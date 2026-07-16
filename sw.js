@@ -1,5 +1,5 @@
 /* Bump CACHE when you change index.html, or the phone keeps the old copy. */
-const CACHE = 'ledger-v3';
+const CACHE = 'ledger-v4';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -18,6 +18,8 @@ self.addEventListener('activate', e => {
    and the app still opens on the MRT with no signal. */
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  // Only manage our own assets; let Google (login / Drive API) go straight to network.
+  if (new URL(e.request.url).origin !== self.location.origin) return;
   e.respondWith(
     fetch(e.request)
       .then(res => {

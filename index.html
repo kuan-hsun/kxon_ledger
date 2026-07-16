@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script src="https://accounts.google.com/gsi/client" async></script>
 <style>
   :root{
     --bg:#101418;
@@ -222,6 +223,7 @@
 <footer>
   <button class="btn" id="statsBtn">統計</button>
   <button class="btn" id="ai">AI</button>
+  <button class="btn" id="drive">Drive</button>
   <button class="btn" id="export">匯出</button>
   <button class="btn" id="import">匯入</button>
   <div class="spacer"></div>
@@ -411,7 +413,7 @@ const $=id=>document.getElementById(id);
 let rows=[];
 
 async function render(){
-  rows=(await all()).sort((a,b)=>b.ts-a.ts);
+  rows=(await all()).filter(r=>!r.deleted).sort((a,b)=>b.ts-a.ts);
   const today=dayKey(Date.now()), w0=weekStart(Date.now());
   $('sumToday').textContent=money(rows.filter(r=>dayKey(r.ts)===today).reduce((s,r)=>s+r.amount,0));
   $('sumWeek').textContent =money(rows.filter(r=>r.ts>=w0).reduce((s,r)=>s+r.amount,0));
@@ -455,9 +457,10 @@ async function add(){
   if(!raw)return;
   const o=parse(raw);
   if(o){                       // 有數字 → 立刻記,分類背景補
+    o.updated=Date.now();
     await put(o);
     $('inp').value='';
-    await render();$('inp').focus();
+    await render();$('inp').focus();scheduleSync();
     enrich(o);
     return;
   }
@@ -467,9 +470,9 @@ async function add(){
       const r=await llmParse(raw);
       if(isFinite(r.amount)&&r.amount!==0){
         await put({id:crypto.randomUUID(),ts:Date.now(),amount:r.amount,
-          merchant:r.merchant||'—',category:r.category,raw_text:raw,source:'ai'});
+          merchant:r.merchant||'—',category:r.category,raw_text:raw,source:'ai',updated:Date.now()});
         $('inp').value='';
-        await render();$('inp').focus();
+        await render();$('inp').focus();scheduleSync();
         return;
       }
     }catch(e){/* 落回下面的提示 */}
@@ -486,7 +489,7 @@ async function enrich(o){
     let changed=false;
     if(r.category){cur.category=r.category;changed=true}
     if(r.merchant&&r.merchant!==cur.merchant){cur.merchant=r.merchant;changed=true}
-    if(changed){cur.source=(cur.source||'text')+'+ai';await put(cur);await render()}
+    if(changed){cur.source=(cur.source||'text')+'+ai';cur.updated=Date.now();await put(cur);await render();scheduleSync()}
   }catch(e){/* 靜默:正規解析的結果留著 */}
 }
 $('add').onclick=add;
@@ -515,7 +518,8 @@ $('sheetDate').addEventListener('change',async e=>{
   const t=new Date(e.target.value).getTime();
   if(!isFinite(t))return;
   sheetRow.ts=t;
-  await put(sheetRow);await render();
+  sheetRow.updated=Date.now();
+  await put(sheetRow);await render();scheduleSync();
   toast('日期已改');
 });
 function closeSheet(){$('scrim').classList.remove('on');$('sheet').classList.remove('on');sheetRow=null}
@@ -528,15 +532,18 @@ $('chipWrap').addEventListener('click',async e=>{
   const ch=e.target.closest('.chip');if(!ch||!sheetRow)return;
   const cat=ch.dataset.cat;
   sheetRow.category=(sheetRow.category===cat)?null:cat; // 再點一次取消
+  sheetRow.updated=Date.now();
   await put(sheetRow);
-  closeSheet();await render();
-  toast(sheetRow.category?`分類:${cat}`:'已清除分類');
+  const msg=sheetRow.category?`分類:${cat}`:'已清除分類';
+  closeSheet();await render();scheduleSync();
+  toast(msg);
 });
 $('sheetDel').onclick=async()=>{
   if(!sheetRow)return;
   const r=sheetRow;
   if(confirm(`刪除「${r.merchant} ${money(r.amount)}」?`)){
-    await del(r.id);closeSheet();await render();toast('已刪除');
+    r.deleted=true;r.updated=Date.now();  // 軟刪除:留 tombstone 讓多裝置同步不會又跑回來
+    await put(r);closeSheet();await render();scheduleSync();toast('已刪除');
   }
 };
 
@@ -619,7 +626,8 @@ async function saveMonthField(ym,f,val){
   const cur=monthMap[ym]||{auction:0,note:''};
   if(f==='auction')cur.auction=parseFloat(val)||0;else cur.note=val;
   monthMap[ym]=cur;
-  await putMonth({ym,auction:cur.auction,note:cur.note});
+  await putMonth({ym,auction:cur.auction,note:cur.note,updated:Date.now()});
+  scheduleSync();
 }
 $('stBody').addEventListener('change',async e=>{
   const el=e.target;if(!el.dataset.ym)return;
@@ -647,6 +655,131 @@ $('ai').onclick=()=>{
   else{localStorage.removeItem('gemini_key');toast('已關閉 AI 分類')}
   reflectAI();
 };
+
+/* ══ Google Drive 同步 ════════════════════════════════════
+   純前端:用 Google Identity Services 拿 access token(drive.file
+   權限,只碰 App 自己建的 ledger.json)。合併規則:同 id 比 updated,
+   新的蓋舊的;刪除是軟刪除 tombstone,所以多裝置不會又跑回來。      */
+let tokenClient=null,driveToken='',tokenExp=0,syncing=false,syncTimer=null;
+const driveClientId=()=>localStorage.getItem('drive_client_id')||'';
+const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+
+function gisReady(){return !!(window.google&&google.accounts&&google.accounts.oauth2)}
+function initTokenClient(){
+  if(tokenClient||!driveClientId()||!gisReady())return tokenClient;
+  tokenClient=google.accounts.oauth2.initTokenClient({client_id:driveClientId(),scope:DRIVE_SCOPE,callback:()=>{}});
+  return tokenClient;
+}
+function getToken(interactive){
+  return new Promise((res,rej)=>{
+    const tc=initTokenClient();
+    if(!tc){rej(new Error('Google 登入尚未載入'));return}
+    tc.callback=resp=>{
+      if(resp&&resp.access_token){driveToken=resp.access_token;tokenExp=Date.now()+((resp.expires_in||3000)*1000);res(driveToken)}
+      else rej(new Error((resp&&resp.error)||'授權失敗'));
+    };
+    try{tc.requestAccessToken({prompt:interactive?'consent':''})}catch(e){rej(e)}
+  });
+}
+async function ensureToken(interactive){
+  if(driveToken&&Date.now()<tokenExp-60000)return driveToken;
+  return getToken(interactive);
+}
+async function driveFetch(url,opts){
+  opts=opts||{};
+  let t=await ensureToken(false);
+  const go=tok=>fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:'Bearer '+tok}});
+  let r=await go(t);
+  if(r.status===401){t=await ensureToken(true);r=await go(t)}
+  return r;
+}
+async function findFile(){
+  const cached=localStorage.getItem('drive_file_id');
+  if(cached)return cached;
+  const q=encodeURIComponent("name='ledger.json' and trashed=false");
+  const r=await driveFetch('https://www.googleapis.com/drive/v3/files?q='+q+'&spaces=drive&fields=files(id,modifiedTime)&orderBy=modifiedTime desc');
+  if(!r.ok)return null;
+  const j=await r.json();const f=j.files&&j.files[0];
+  if(f){localStorage.setItem('drive_file_id',f.id);return f.id}
+  return null;
+}
+async function downloadRemote(id){
+  const r=await driveFetch('https://www.googleapis.com/drive/v3/files/'+id+'?alt=media');
+  if(r.status===404){localStorage.removeItem('drive_file_id');return null}
+  if(!r.ok)return null;
+  try{return await r.json()}catch{return null}
+}
+async function uploadRemote(id,payload){
+  const body=JSON.stringify(payload);
+  if(id){
+    const r=await driveFetch('https://www.googleapis.com/upload/drive/v3/files/'+id+'?uploadType=media',
+      {method:'PATCH',headers:{'Content-Type':'application/json'},body});
+    return r.ok?id:null;
+  }
+  const b='b'+Math.random().toString(36).slice(2);
+  const meta={name:'ledger.json',mimeType:'application/json'};
+  const multipart='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)
+    +'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+body+'\r\n--'+b+'--';
+  const r=await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+    {method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body:multipart});
+  if(!r.ok)return null;
+  const j=await r.json();
+  if(j.id){localStorage.setItem('drive_file_id',j.id);return j.id}
+  return null;
+}
+function mergeById(a,b,key){
+  const m=new Map();
+  for(const x of a)m.set(x[key],x);
+  for(const x of b){const e=m.get(x[key]);if(!e||(x.updated||0)>(e.updated||0))m.set(x[key],x)}
+  return [...m.values()];
+}
+async function driveSync(interactive){
+  if(!driveClientId()||syncing)return;
+  syncing=true;
+  try{
+    await ensureToken(interactive);
+    let fid=await findFile();
+    const remote=fid?await downloadRemote(fid):null;
+    if(fid&&!localStorage.getItem('drive_file_id'))fid=null; // 遠端檔被刪 → 重建
+    const rTx=(remote&&remote.tx)||[],rMonth=(remote&&remote.monthly)||[];
+    const mTx=mergeById(await all(),rTx,'id');
+    const mMonth=mergeById(await allMonths(),rMonth,'ym');
+    for(const r of mTx)await put(r);
+    for(const m of mMonth)await putMonth(m);
+    await uploadRemote(fid,{v:3,exported:new Date().toISOString(),tx:mTx,monthly:mMonth});
+    await render();driveMark();
+    if(interactive)toast('已同步 Drive');
+  }catch(e){if(interactive)toast('同步失敗:'+(e.message||e))}
+  finally{syncing=false}
+}
+function scheduleSync(){
+  if(!driveClientId())return;
+  clearTimeout(syncTimer);syncTimer=setTimeout(()=>driveSync(false),2500);
+}
+function driveMark(){const b=$('drive');b.textContent='Drive ✓';b.style.color='var(--accent)';b.style.borderColor='var(--accent)'}
+function reflectDrive(){const on=!!driveClientId();const b=$('drive');
+  b.textContent=on?'Drive ✓':'Drive';b.style.color=on?'var(--good)':'';b.style.borderColor=on?'var(--good)':''}
+$('drive').onclick=async()=>{
+  if(driveClientId()){
+    if(!confirm('立即同步 Drive?\n(按「取消」可解除連結)')){
+      localStorage.removeItem('drive_client_id');localStorage.removeItem('drive_file_id');
+      driveToken='';tokenClient=null;reflectDrive();toast('已解除 Drive');return;
+    }
+    toast('同步中…');await driveSync(true);return;
+  }
+  const v=prompt('貼上 Google OAuth Client ID(結尾是 .apps.googleusercontent.com)。\n設定步驟我另外給你。留空取消。','');
+  if(v===null)return;const k=v.trim();if(!k)return;
+  localStorage.setItem('drive_client_id',k);tokenClient=null;reflectDrive();
+  toast('連線中…');await driveSync(true);
+};
+function bootSync(){
+  if(!driveClientId())return;
+  let n=0;const t=setInterval(()=>{
+    if(gisReady()){clearInterval(t);driveSync(false)}
+    else if(++n>25)clearInterval(t);
+  },300);
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&driveClientId())driveSync(false)});
 
 /* ══ export / import ══════════════════════════════════════ */
 $('export').onclick=async()=>{
@@ -683,7 +816,8 @@ $('file').onchange=async e=>{
 /* ══ boot ═════════════════════════════════════════════════ */
 buildChips();
 reflectAI();
-open().then(render).catch(()=>{
+reflectDrive();
+open().then(render).then(bootSync).catch(()=>{
   document.body.innerHTML='<div class="empty">這個瀏覽器不給用 IndexedDB。<br>如果開的是無痕視窗,換一般視窗試試。</div>';
 });
 if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
