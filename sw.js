@@ -1,5 +1,5 @@
 /* Bump CACHE when you change index.html, or the phone keeps the old copy. */
-const CACHE = 'ledger-v1';
+const CACHE = 'ledger-v3';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

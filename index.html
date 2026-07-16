@@ -18,8 +18,10 @@
     --field:#171d23;
     --accent:#c8f04a;
     --warn:#e8735a;
+    --good:#7fc99a;
     --r:10px;
     --pad:20px;
+    color-scheme:dark;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%}
@@ -49,6 +51,14 @@
   }
   #inp:focus{border-color:var(--accent)}
   #inp::placeholder{color:#4d565c}
+  .mic{
+    flex:none;width:52px;border:1px solid var(--line);border-radius:var(--r);
+    background:var(--field);color:var(--dim);font-size:22px;cursor:pointer;
+    transition:color .12s,border-color .12s,background .12s;
+  }
+  .mic:active{color:var(--ink)}
+  .mic.rec{background:var(--warn);color:#101418;border-color:var(--warn);animation:pulse 1s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.55}}
   #add{
     flex:none;width:52px;border:none;border-radius:var(--r);
     background:var(--accent);color:#101418;font-size:24px;font-weight:500;
@@ -67,12 +77,14 @@
     position:sticky;top:0;background:var(--bg);
   }
   .row{
-    display:flex;align-items:baseline;gap:12px;
+    display:flex;align-items:baseline;gap:10px;
     padding:11px var(--pad);border-bottom:1px solid var(--line);
     cursor:pointer;transition:background .12s;
   }
   .row:active{background:var(--field)}
+  .r-dot{flex:none;width:9px;height:9px;border-radius:50%;background:#333c44;align-self:center}
   .r-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .r-cat{font-size:12px;color:var(--dim);flex:none}
   .r-time{font-size:12px;color:var(--dim);flex:none}
   .r-amt{font-size:17px;flex:none;letter-spacing:-.01em}
   .empty{padding:60px var(--pad);text-align:center;color:var(--dim);font-size:14px;line-height:1.8}
@@ -100,6 +112,85 @@
     opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:9;
   }
   #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* ── sheet (bottom) ─────────────────── */
+  .scrim{
+    position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;
+    opacity:0;pointer-events:none;transition:opacity .18s;
+  }
+  .scrim.on{opacity:1;pointer-events:auto}
+  .sheet{
+    position:fixed;left:0;right:0;bottom:0;z-index:21;
+    background:var(--bg);border-top:1px solid var(--line);
+    border-radius:16px 16px 0 0;
+    padding:14px var(--pad) calc(18px + env(safe-area-inset-bottom));
+    transform:translateY(100%);transition:transform .22s cubic-bezier(.2,.7,.3,1);
+    max-height:82vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  }
+  .sheet.on{transform:translateY(0)}
+  .sheet-title{font-size:13px;color:var(--dim);margin:2px 0 14px;display:flex;justify-content:space-between;align-items:baseline}
+  .sheet-date{display:flex;align-items:center;gap:12px;margin:0 0 6px}
+  .sheet-date input{
+    flex:1;background:var(--field);color:var(--ink);
+    border:1px solid var(--line);border-radius:var(--r);
+    padding:10px 12px;font:inherit;font-size:15px;outline:none;
+  }
+  .sheet-date input:focus{border-color:var(--accent)}
+  .grp-label{font-size:11px;letter-spacing:.1em;color:var(--dim);margin:14px 0 8px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{
+    display:inline-flex;align-items:center;gap:7px;
+    border:1px solid var(--line);border-radius:20px;
+    padding:8px 13px;font-size:14px;color:var(--ink);
+    background:var(--field);cursor:pointer;transition:border-color .12s,background .12s;
+  }
+  .chip:active{background:#1e262d}
+  .chip.sel{border-color:var(--accent)}
+  .chip .cd{width:11px;height:11px;border-radius:50%;flex:none}
+  .sheet-del{
+    margin-top:20px;width:100%;padding:13px;border-radius:var(--r);
+    background:none;border:1px solid var(--line);color:var(--warn);
+    font-size:15px;font-family:inherit;cursor:pointer;
+  }
+  .sheet-del:active{background:#1e262d}
+
+  /* ── stats panel ────────────────────── */
+  #stats{
+    position:fixed;inset:0;z-index:15;background:var(--bg);
+    display:none;flex-direction:column;
+    padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  #stats.on{display:flex}
+  .st-head{
+    display:flex;align-items:center;gap:12px;
+    padding:18px var(--pad);border-bottom:1px solid var(--line);
+  }
+  .st-head h2{margin:0;font-size:16px;font-weight:500;flex:1}
+  .yr{display:flex;align-items:center;gap:14px;color:var(--ink)}
+  .yr button{background:none;border:none;color:var(--dim);font-size:20px;cursor:pointer;padding:0 4px}
+  .yr button:active{color:var(--ink)}
+  .st-scroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch}
+  table.st{border-collapse:collapse;width:100%;font-size:14px}
+  table.st th,table.st td{padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;text-align:right}
+  table.st th{
+    font-size:11px;letter-spacing:.08em;color:var(--dim);font-weight:500;
+    position:sticky;top:0;background:var(--bg);z-index:1;
+  }
+  table.st td.ym{text-align:left;color:var(--dim)}
+  table.st td.ent{color:var(--accent)}
+  table.st td.auc{color:var(--good)}
+  table.st td.bal.pos{background:rgba(127,201,154,.14)}
+  table.st td.bal.neg{background:rgba(232,115,90,.16)}
+  table.st tr.total td{font-weight:600;border-top:2px solid var(--line);border-bottom:none;background:#141a20}
+  table.st input{
+    width:88px;background:var(--field);color:var(--ink);
+    border:1px solid var(--line);border-radius:7px;padding:6px 8px;
+    font:inherit;font-size:14px;text-align:right;outline:none;
+  }
+  table.st input.note{width:150px;text-align:left}
+  table.st input:focus{border-color:var(--accent)}
+  .st-foot{padding:12px var(--pad);border-top:1px solid var(--line);font-size:12px;color:var(--dim)}
+
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -121,14 +212,17 @@
 <div class="entry">
   <input id="inp" type="text" placeholder="星巴克 120" autocomplete="off"
          autocapitalize="off" autocorrect="off" enterkeyhint="done">
+  <button id="mic" class="mic" aria-label="語音輸入" title="語音輸入">🎙</button>
   <button id="add" aria-label="新增">+</button>
 </div>
-<div class="hint">打「商家 金額」或「金額 商家」都可以。數字就是金額。</div>
+<div class="hint" id="hint">打「商家 金額」或按 🎙 說話。記完點一下那筆可以選分類。</div>
 
 <main id="list"></main>
 
 <footer>
-  <button class="btn" id="export">匯出 JSON</button>
+  <button class="btn" id="statsBtn">統計</button>
+  <button class="btn" id="ai">AI</button>
+  <button class="btn" id="export">匯出</button>
   <button class="btn" id="import">匯入</button>
   <div class="spacer"></div>
   <span class="count" id="count"></span>
@@ -137,38 +231,142 @@
 <input type="file" id="file" accept="application/json" hidden>
 <div id="toast"></div>
 
+<!-- category / delete sheet -->
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-title"><span id="sheetName">—</span><span id="sheetAmt" class="num"></span></div>
+  <div class="sheet-date">
+    <span class="grp-label" style="margin:0">日期時間</span>
+    <input type="datetime-local" id="sheetDate">
+  </div>
+  <div id="chipWrap"></div>
+  <button class="sheet-del" id="sheetDel">刪除這筆</button>
+</div>
+
+<!-- stats panel -->
+<div id="stats">
+  <div class="st-head">
+    <h2>娛樂花費 · 拍賣收入</h2>
+    <div class="yr">
+      <button id="yrPrev" aria-label="上一年">‹</button>
+      <span id="yrLabel" class="num">2026</span>
+      <button id="yrNext" aria-label="下一年">›</button>
+    </div>
+    <button class="btn" id="statsClose">關閉</button>
+  </div>
+  <div class="st-scroll">
+    <table class="st">
+      <thead>
+        <tr><th style="text-align:left">月份</th><th>娛樂花費</th><th>拍賣收入</th><th>平衡</th><th style="text-align:left">備註</th></tr>
+      </thead>
+      <tbody id="stBody"></tbody>
+    </table>
+  </div>
+  <div class="st-foot">娛樂花費 = 該月分類「娛樂」的支出，自動加總。拍賣收入與備註手動填。平衡 = 拍賣收入 − 娛樂花費。</div>
+</div>
+
 <script>
+/* ══ categories ═══════════════════════════════════════════════
+   支出/投資/保險分類。收入不在這裡記,收入(拍賣)在統計表填。
+   顏色沿用試算表的色帶。key 就是顯示名。                        */
+const C={pink:'#f0bfb8',blue:'#bcd4dc',brown:'#7a4a24',dred:'#9e1b2f',
+         yellow:'#efdf9e',plight:'#d6c4ef',pdark:'#4a2a86'};
+const CAT_GROUPS=[
+  {g:'飲食 · 個人', items:[['外食',C.pink],['保健食品',C.pink],['零食飲料',C.pink],['衣物',C.pink],['鞋子',C.pink],['理髮',C.pink],['書籍',C.pink],['購物',C.pink]]},
+  {g:'居家 · 水電', items:[['日用品',C.blue],['水費',C.blue],['電費',C.blue],['手機費',C.blue],['網路費',C.blue],['天然氣',C.blue],['修繕',C.blue],['房屋基金',C.pdark]]},
+  {g:'交通 · 車', items:[['停車費',C.pink],['油錢',C.pink],['eTag',C.pink],['保養(年)',C.pink],['車險(年)',C.pink],['各類車險',C.pink],['洗車',C.pink],['大眾運輸',C.pink]]},
+  {g:'小孩', items:[['尿布奶粉',C.pink],['小孩醫療',C.pink],['小孩周邊',C.pink]]},
+  {g:'休閒 · 娛樂', items:[['娛樂',C.pink],['串流',C.pink],['旅遊',C.pink],['運動',C.pink],['送禮(年)',C.pink],['上課進修',C.pink]]},
+  {g:'保險 · 醫療', items:[['醫療',C.pink],['富邦儲蓄壽險(年)',C.pink],['全球壽險(年)',C.pink],['第一金癌症險',C.pink],['遠雄醫療險(年)',C.pink],['國民年金或健保',C.pink]]},
+  {g:'投資 · 其他', items:[['定期定額',C.yellow],['加碼投資',C.yellow],['創業投入',C.plight],['代墊',C.brown],['預期外支出',C.dred]]},
+];
+const CAT_COLOR={};CAT_GROUPS.forEach(gr=>gr.items.forEach(([k,c])=>CAT_COLOR[k]=c));
+const CAT_NAMES=Object.keys(CAT_COLOR);
+const ENT_CAT='娛樂'; // 統計表「娛樂花費」的來源分類
+
+/* ══ LLM (Gemini) ═════════════════════════════════════════
+   給自己用:key 放 localStorage,瀏覽器直接打 Gemini。
+   免費額度(1500次/天)個人綽綽有餘。沒 key 或離線就走正規解析。
+   註:免費層的內容可能被拿去訓練,介意就換付費層。            */
+const GEMINI_MODEL='gemini-2.5-flash-lite';
+const geminiKey=()=>localStorage.getItem('gemini_key')||'';
+const aiReady=()=>!!geminiKey()&&navigator.onLine;
+
+async function llmParse(raw){
+  const key=geminiKey();
+  if(!key) throw new Error('no key');
+  const sys='你是記帳助手。使用者用中文口語或簡短文字描述「一筆支出」。'+
+    '請抽取:商家或項目名稱(merchant)、金額(amount,阿拉伯數字,像「一百二」要轉成120)、'+
+    '以及最合適的分類(category)。category 必須從這個清單挑一個,真的沒有合適的就填「未分類」:\n'+
+    CAT_NAMES.join('、');
+  const body={
+    system_instruction:{parts:[{text:sys}]},
+    contents:[{parts:[{text:raw}]}],
+    generationConfig:{
+      temperature:0,
+      responseMimeType:'application/json',
+      responseSchema:{
+        type:'OBJECT',
+        properties:{
+          merchant:{type:'STRING'},
+          amount:{type:'NUMBER'},
+          category:{type:'STRING',enum:[...CAT_NAMES,'未分類']}
+        },
+        required:['merchant','amount','category']
+      }
+    }
+  };
+  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+GEMINI_MODEL+':generateContent',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','x-goog-api-key':key},
+    body:JSON.stringify(body)
+  });
+  if(!r.ok) throw new Error('http '+r.status);
+  const j=await r.json();
+  const txt=j.candidates?.[0]?.content?.parts?.[0]?.text;
+  if(!txt) throw new Error('empty');
+  const o=JSON.parse(txt);
+  return {
+    merchant:(o.merchant||'').trim(),
+    amount:Number(o.amount),
+    category:(o.category&&o.category!=='未分類'&&CAT_COLOR[o.category])?o.category:null
+  };
+}
+
 /* ══ storage ══════════════════════════════════════════════ */
-const DB='ledger', STORE='tx';
+const DB='ledger';
 let db;
 
 function open(){
   return new Promise((res,rej)=>{
-    const r=indexedDB.open(DB,1);
+    const r=indexedDB.open(DB,2);
     r.onupgradeneeded=e=>{
       const d=e.target.result;
-      if(!d.objectStoreNames.contains(STORE)){
-        const s=d.createObjectStore(STORE,{keyPath:'id'});
+      if(!d.objectStoreNames.contains('tx')){
+        const s=d.createObjectStore('tx',{keyPath:'id'});
         s.createIndex('ts','ts');
+      }
+      if(!d.objectStoreNames.contains('monthly')){
+        d.createObjectStore('monthly',{keyPath:'ym'}); // {ym:'2026-07',auction,note}
       }
     };
     r.onsuccess=e=>{db=e.target.result;res()};
     r.onerror=()=>rej(r.error);
   });
 }
-function tx(mode){return db.transaction(STORE,mode).objectStore(STORE)}
-function put(o){return new Promise((res,rej)=>{const r=tx('readwrite').put(o);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
-function del(id){return new Promise((res,rej)=>{const r=tx('readwrite').delete(id);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
-function all(){return new Promise((res,rej)=>{const r=tx('readonly').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
+function store(name,mode){return db.transaction(name,mode).objectStore(name)}
+function put(o){return new Promise((res,rej)=>{const r=store('tx','readwrite').put(o);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
+function del(id){return new Promise((res,rej)=>{const r=store('tx','readwrite').delete(id);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
+function all(){return new Promise((res,rej)=>{const r=store('tx','readonly').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
+function putMonth(o){return new Promise((res,rej)=>{const r=store('monthly','readwrite').put(o);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
+function allMonths(){return new Promise((res,rej)=>{const r=store('monthly','readonly').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
 
 /* ══ parse ════════════════════════════════════════════════
-   v1 is regex-only and deliberately dumb: pull the number,
-   everything else is the merchant. LLM parsing comes later —
-   raw_text is stored so old rows can be re-parsed then.      */
+   仍然刻意簡單:抓數字,其餘當商家。分類之後用點選補。
+   raw_text 保留,之後接 LLM 可重新解析。                      */
 function parse(raw){
   const s=raw.trim();
   if(!s) return null;
-  // last standalone number wins; handles "星巴克 120" and "120 星巴克"
   const m=s.match(/(-?\d+(?:[.,]\d+)?)(?!.*\d)/);
   if(!m) return null;
   const amount=parseFloat(m[1].replace(',',''));
@@ -188,6 +386,7 @@ function parse(raw){
 
 /* ══ dates ════════════════════════════════════════════════ */
 const dayKey=ts=>{const d=new Date(ts);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+const ymKey=ts=>{const d=new Date(ts);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')};
 function weekStart(ts){ // Monday 00:00
   const d=new Date(ts);d.setHours(0,0,0,0);
   d.setDate(d.getDate()-((d.getDay()+6)%7));
@@ -204,6 +403,8 @@ function dayLabel(k){
   return `${+M}/${+D} 週${WD[new Date(k+'T00:00').getDay()]}`;
 }
 const hhmm=ts=>{const d=new Date(ts);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
+const dtLocal=ts=>{const d=new Date(ts),p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())};
 
 /* ══ render ═══════════════════════════════════════════════ */
 const $=id=>document.getElementById(id);
@@ -218,7 +419,7 @@ async function render(){
 
   const list=$('list');
   if(!rows.length){
-    list.innerHTML='<div class="empty">還沒有紀錄。<br>在上面打一句話就好。</div>';
+    list.innerHTML='<div class="empty">還沒有紀錄。<br>在上面打一句話,或按 🎙 說一句就好。</div>';
     return;
   }
   const groups={};
@@ -226,12 +427,16 @@ async function render(){
   list.innerHTML=Object.entries(groups).map(([k,rs])=>`
     <div class="daygroup">
       <div class="dayhead"><span>${dayLabel(k)}</span><span class="num">${money(rs.reduce((s,r)=>s+r.amount,0))}</span></div>
-      ${rs.map(r=>`
+      ${rs.map(r=>{
+        const col=r.category?CAT_COLOR[r.category]:null;
+        return `
         <div class="row" data-id="${r.id}">
+          <span class="r-dot" style="${col?`background:${col}`:''}"></span>
           <span class="r-name">${esc(r.merchant)}</span>
+          ${r.category?`<span class="r-cat">${esc(r.category)}</span>`:''}
           <span class="r-time num">${hhmm(r.ts)}</span>
           <span class="r-amt num">${money(r.amount)}</span>
-        </div>`).join('')}
+        </div>`;}).join('')}
     </div>`).join('');
 }
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -242,28 +447,211 @@ function toast(msg){
   clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),1800);
 }
 
-/* ══ actions ══════════════════════════════════════════════ */
+/* ══ add ══════════════════════════════════════════════════
+   快路徑:正規解析先秒記(category 空),再背景叫 Gemini 補分類。
+   慢路徑:整句沒抓到數字時(例:語音「星巴克一百二」),才等 LLM。 */
 async function add(){
-  const raw=$('inp').value;
+  const raw=$('inp').value.trim();
+  if(!raw)return;
   const o=parse(raw);
-  if(!o){toast('要有數字才能記');return}
-  await put(o);
-  $('inp').value='';
-  await render();
-  $('inp').focus();
+  if(o){                       // 有數字 → 立刻記,分類背景補
+    await put(o);
+    $('inp').value='';
+    await render();$('inp').focus();
+    enrich(o);
+    return;
+  }
+  if(aiReady()){               // 沒數字 → 讓 LLM 試(含口語數字)
+    toast('辨識中…');
+    try{
+      const r=await llmParse(raw);
+      if(isFinite(r.amount)&&r.amount!==0){
+        await put({id:crypto.randomUUID(),ts:Date.now(),amount:r.amount,
+          merchant:r.merchant||'—',category:r.category,raw_text:raw,source:'ai'});
+        $('inp').value='';
+        await render();$('inp').focus();
+        return;
+      }
+    }catch(e){/* 落回下面的提示 */}
+  }
+  toast('要有數字才能記');
+}
+// 背景補分類:只在使用者還沒手動分類時才寫,不覆蓋人工選擇
+async function enrich(o){
+  if(!aiReady())return;
+  try{
+    const r=await llmParse(o.raw_text);
+    const cur=(await all()).find(x=>x.id===o.id);
+    if(!cur||cur.category)return;
+    let changed=false;
+    if(r.category){cur.category=r.category;changed=true}
+    if(r.merchant&&r.merchant!==cur.merchant){cur.merchant=r.merchant;changed=true}
+    if(changed){cur.source=(cur.source||'text')+'+ai';await put(cur);await render()}
+  }catch(e){/* 靜默:正規解析的結果留著 */}
 }
 $('add').onclick=add;
 $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')add()});
 
-$('list').addEventListener('click',async e=>{
-  const row=e.target.closest('.row');if(!row)return;
-  const r=rows.find(x=>x.id===row.dataset.id);if(!r)return;
-  if(confirm(`刪除「${r.merchant} ${money(r.amount)}」?`)){await del(r.id);await render();toast('已刪除')}
+/* ══ category / delete sheet ══════════════════════════════ */
+let sheetRow=null;
+function buildChips(){
+  $('chipWrap').innerHTML=CAT_GROUPS.map(gr=>`
+    <div class="grp-label">${gr.g}</div>
+    <div class="chips">${gr.items.map(([k,c])=>
+      `<button class="chip" data-cat="${esc(k)}"><span class="cd" style="background:${c}"></span>${esc(k)}</button>`
+    ).join('')}</div>`).join('');
+}
+function openSheet(r){
+  sheetRow=r;
+  $('sheetName').textContent=r.merchant;
+  $('sheetAmt').textContent=money(r.amount);
+  $('sheetDate').value=dtLocal(r.ts);
+  document.querySelectorAll('.chip').forEach(ch=>
+    ch.classList.toggle('sel',ch.dataset.cat===r.category));
+  $('scrim').classList.add('on');$('sheet').classList.add('on');
+}
+$('sheetDate').addEventListener('change',async e=>{
+  if(!sheetRow||!e.target.value)return;
+  const t=new Date(e.target.value).getTime();
+  if(!isFinite(t))return;
+  sheetRow.ts=t;
+  await put(sheetRow);await render();
+  toast('日期已改');
 });
+function closeSheet(){$('scrim').classList.remove('on');$('sheet').classList.remove('on');sheetRow=null}
+$('scrim').onclick=closeSheet;
+$('list').addEventListener('click',e=>{
+  const row=e.target.closest('.row');if(!row)return;
+  const r=rows.find(x=>x.id===row.dataset.id);if(r)openSheet(r);
+});
+$('chipWrap').addEventListener('click',async e=>{
+  const ch=e.target.closest('.chip');if(!ch||!sheetRow)return;
+  const cat=ch.dataset.cat;
+  sheetRow.category=(sheetRow.category===cat)?null:cat; // 再點一次取消
+  await put(sheetRow);
+  closeSheet();await render();
+  toast(sheetRow.category?`分類:${cat}`:'已清除分類');
+});
+$('sheetDel').onclick=async()=>{
+  if(!sheetRow)return;
+  const r=sheetRow;
+  if(confirm(`刪除「${r.merchant} ${money(r.amount)}」?`)){
+    await del(r.id);closeSheet();await render();toast('已刪除');
+  }
+};
 
+/* ══ voice ════════════════════════════════════════════════
+   Web Speech API。桌面 Chrome / Android 可用;iOS 標準版鍵盤
+   的麥克風聽寫也能直接對文字框講,所以不支援時就隱藏按鈕。   */
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(!SR){
+  $('mic').style.display='none';
+  $('hint').textContent='打「商家 金額」。用手機的話,鍵盤上的麥克風也能直接講。記完點那筆選分類。';
+}else{
+  let rec=null,recording=false;
+  const mic=$('mic');
+  mic.onclick=()=>{
+    if(recording){rec&&rec.stop();return}
+    rec=new SR();rec.lang='zh-TW';rec.interimResults=true;rec.maxAlternatives=1;
+    let finalTx='';
+    rec.onstart=()=>{recording=true;mic.classList.add('rec')};
+    rec.onresult=ev=>{
+      let interim='';
+      for(let i=ev.resultIndex;i<ev.results.length;i++){
+        const t=ev.results[i][0].transcript;
+        if(ev.results[i].isFinal)finalTx+=t;else interim+=t;
+      }
+      $('inp').value=(finalTx+interim).trim();
+    };
+    rec.onerror=ev=>{toast(ev.error==='not-allowed'?'麥克風被擋住了':'聽不清楚,再試一次')};
+    rec.onend=()=>{
+      recording=false;mic.classList.remove('rec');
+      const v=$('inp').value.trim();
+      if(v&&parse(v)) add(); // 有數字就直接記,錯了點掉就好
+      else if(v) toast('沒聽到金額,補一下數字再送');
+    };
+    try{rec.start()}catch{ /* already started */ }
+  };
+}
+
+/* ══ stats ════════════════════════════════════════════════ */
+let statYear=new Date().getFullYear();
+let monthMap={}; // ym -> {auction,note}
+async function loadMonths(){
+  monthMap={};(await allMonths()).forEach(m=>monthMap[m.ym]={auction:m.auction||0,note:m.note||''});
+}
+function entSpend(){ // ym -> 娛樂花費
+  const map={};
+  rows.forEach(r=>{if(r.category===ENT_CAT){const k=ymKey(r.ts);map[k]=(map[k]||0)+r.amount}});
+  return map;
+}
+async function renderStats(){
+  await loadMonths();
+  const ent=entSpend();
+  $('yrLabel').textContent=statYear;
+  let tE=0,tA=0;
+  let html='';
+  for(let mo=1;mo<=12;mo++){
+    const ym=statYear+'-'+String(mo).padStart(2,'0');
+    const e=Math.round(ent[ym]||0);
+    const a=Math.round(monthMap[ym]?.auction||0);
+    const note=monthMap[ym]?.note||'';
+    const bal=a-e;
+    tE+=e;tA+=a;
+    html+=`<tr>
+      <td class="ym num">${ym}</td>
+      <td class="ent num">${e?money(e):'—'}</td>
+      <td class="auc"><input type="number" inputmode="numeric" class="num" data-ym="${ym}" data-f="auction" value="${a||''}" placeholder="0"></td>
+      <td class="bal num ${bal>=0?'pos':'neg'}">${(a||e)?money(bal):'—'}</td>
+      <td><input type="text" class="note" data-ym="${ym}" data-f="note" value="${esc(note)}" placeholder="備註"></td>
+    </tr>`;
+  }
+  const tB=tA-tE;
+  html+=`<tr class="total">
+    <td class="ym">總額</td>
+    <td class="ent num">${money(tE)}</td>
+    <td class="auc num">${money(tA)}</td>
+    <td class="bal num ${tB>=0?'pos':'neg'}">${money(tB)}</td>
+    <td></td></tr>`;
+  $('stBody').innerHTML=html;
+}
+async function saveMonthField(ym,f,val){
+  const cur=monthMap[ym]||{auction:0,note:''};
+  if(f==='auction')cur.auction=parseFloat(val)||0;else cur.note=val;
+  monthMap[ym]=cur;
+  await putMonth({ym,auction:cur.auction,note:cur.note});
+}
+$('stBody').addEventListener('change',async e=>{
+  const el=e.target;if(!el.dataset.ym)return;
+  await saveMonthField(el.dataset.ym,el.dataset.f,el.value);
+  await renderStats();
+});
+$('statsBtn').onclick=async()=>{await renderStats();$('stats').classList.add('on')};
+$('statsClose').onclick=()=>$('stats').classList.remove('on');
+$('yrPrev').onclick=async()=>{statYear--;await renderStats()};
+$('yrNext').onclick=async()=>{statYear++;await renderStats()};
+
+/* ══ AI key ═══════════════════════════════════════════════ */
+function reflectAI(){
+  const on=!!geminiKey();
+  $('ai').style.color=on?'var(--accent)':'';
+  $('ai').style.borderColor=on?'var(--accent)':'';
+  $('ai').textContent=on?'AI ✓':'AI';
+}
+$('ai').onclick=()=>{
+  const cur=geminiKey();
+  const v=prompt('貼上 Gemini API key,語音/文字會自動分類。\n免費額度個人夠用(1500次/天)。留空可關閉。\n\n去 aistudio.google.com/apikey 拿 key。',cur);
+  if(v===null)return;
+  const k=v.trim();
+  if(k){localStorage.setItem('gemini_key',k);toast('AI 分類已開啟')}
+  else{localStorage.removeItem('gemini_key');toast('已關閉 AI 分類')}
+  reflectAI();
+};
+
+/* ══ export / import ══════════════════════════════════════ */
 $('export').onclick=async()=>{
-  const data=await all();
-  const blob=new Blob([JSON.stringify({v:1,exported:new Date().toISOString(),tx:data},null,2)],{type:'application/json'});
+  const data=await all();const months=await allMonths();
+  const blob=new Blob([JSON.stringify({v:2,exported:new Date().toISOString(),tx:data,monthly:months},null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download=`ledger-${dayKey(Date.now())}.json`;
@@ -271,7 +659,6 @@ $('export').onclick=async()=>{
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   toast(`匯出 ${data.length} 筆`);
 };
-
 $('import').onclick=()=>$('file').click();
 $('file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
@@ -284,14 +671,18 @@ $('file').onchange=async e=>{
     for(const r of incoming){
       if(!r.id||!isFinite(r.amount)||!r.ts)continue;
       if(have.has(r.id))continue;
+      if(!('category' in r))r.category=null;
       await put(r);n++;
     }
+    if(Array.isArray(j.monthly))for(const m of j.monthly){if(m&&m.ym)await putMonth(m)}
     await render();toast(`匯入 ${n} 筆`);
   }catch{toast('檔案讀不了')}
   e.target.value='';
 };
 
 /* ══ boot ═════════════════════════════════════════════════ */
+buildChips();
+reflectAI();
 open().then(render).catch(()=>{
   document.body.innerHTML='<div class="empty">這個瀏覽器不給用 IndexedDB。<br>如果開的是無痕視窗,換一般視窗試試。</div>';
 });
