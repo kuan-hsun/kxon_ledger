@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<title>記帳</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root{
+    --bg:#101418;
+    --ink:#e8eae6;
+    --dim:#6f7a80;
+    --line:#242c33;
+    --field:#171d23;
+    --accent:#c8f04a;
+    --warn:#e8735a;
+    --r:10px;
+    --pad:20px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg);color:var(--ink);
+    font:400 16px/1.45 ui-sans-serif,-apple-system,"Noto Sans TC",system-ui,sans-serif;
+    display:flex;flex-direction:column;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    overscroll-behavior:none;
+  }
+  .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+
+  /* ── totals ─────────────────────────── */
+  header{padding:28px var(--pad) 18px;border-bottom:1px solid var(--line)}
+  .totals{display:flex;gap:36px;align-items:flex-end}
+  .t-label{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+  .t-today{font-size:40px;font-weight:300;line-height:1;letter-spacing:-.02em}
+  .t-week{font-size:22px;font-weight:300;line-height:1;color:var(--dim);letter-spacing:-.01em}
+
+  /* ── input ──────────────────────────── */
+  .entry{padding:16px var(--pad);border-bottom:1px solid var(--line);display:flex;gap:10px}
+  #inp{
+    flex:1;min-width:0;background:var(--field);color:var(--ink);
+    border:1px solid var(--line);border-radius:var(--r);
+    padding:14px 14px;font-size:17px;font-family:inherit;
+    outline:none;transition:border-color .12s;
+  }
+  #inp:focus{border-color:var(--accent)}
+  #inp::placeholder{color:#4d565c}
+  #add{
+    flex:none;width:52px;border:none;border-radius:var(--r);
+    background:var(--accent);color:#101418;font-size:24px;font-weight:500;
+    cursor:pointer;transition:opacity .12s;
+  }
+  #add:active{opacity:.6}
+  .hint{padding:0 var(--pad) 14px;font-size:12px;color:var(--dim);margin-top:-4px}
+
+  /* ── list ───────────────────────────── */
+  main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .daygroup{padding-top:6px}
+  .dayhead{
+    padding:14px var(--pad) 6px;font-size:11px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--dim);
+    display:flex;justify-content:space-between;
+    position:sticky;top:0;background:var(--bg);
+  }
+  .row{
+    display:flex;align-items:baseline;gap:12px;
+    padding:11px var(--pad);border-bottom:1px solid var(--line);
+    cursor:pointer;transition:background .12s;
+  }
+  .row:active{background:var(--field)}
+  .r-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .r-time{font-size:12px;color:var(--dim);flex:none}
+  .r-amt{font-size:17px;flex:none;letter-spacing:-.01em}
+  .empty{padding:60px var(--pad);text-align:center;color:var(--dim);font-size:14px;line-height:1.8}
+
+  /* ── footer ─────────────────────────── */
+  footer{
+    padding:12px var(--pad);border-top:1px solid var(--line);
+    display:flex;gap:8px;align-items:center;
+  }
+  .btn{
+    background:none;border:1px solid var(--line);color:var(--dim);
+    border-radius:var(--r);padding:8px 14px;font-size:13px;font-family:inherit;
+    cursor:pointer;transition:color .12s,border-color .12s;
+  }
+  .btn:active{color:var(--ink);border-color:var(--dim)}
+  .spacer{flex:1}
+  .count{font-size:12px;color:var(--dim)}
+
+  /* ── toast ──────────────────────────── */
+  #toast{
+    position:fixed;left:50%;transform:translateX(-50%) translateY(20px);
+    bottom:calc(76px + env(safe-area-inset-bottom));
+    background:var(--field);border:1px solid var(--line);
+    padding:10px 18px;border-radius:var(--r);font-size:14px;
+    opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:9;
+  }
+  #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="totals">
+    <div>
+      <div class="t-label">今天</div>
+      <div class="t-today num" id="sumToday">0</div>
+    </div>
+    <div>
+      <div class="t-label">本週</div>
+      <div class="t-week num" id="sumWeek">0</div>
+    </div>
+  </div>
+</header>
+
+<div class="entry">
+  <input id="inp" type="text" placeholder="星巴克 120" autocomplete="off"
+         autocapitalize="off" autocorrect="off" enterkeyhint="done">
+  <button id="add" aria-label="新增">+</button>
+</div>
+<div class="hint">打「商家 金額」或「金額 商家」都可以。數字就是金額。</div>
+
+<main id="list"></main>
+
+<footer>
+  <button class="btn" id="export">匯出 JSON</button>
+  <button class="btn" id="import">匯入</button>
+  <div class="spacer"></div>
+  <span class="count" id="count"></span>
+</footer>
+
+<input type="file" id="file" accept="application/json" hidden>
+<div id="toast"></div>
+
+<script>
+/* ══ storage ══════════════════════════════════════════════ */
+const DB='ledger', STORE='tx';
+let db;
+
+function open(){
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(DB,1);
+    r.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains(STORE)){
+        const s=d.createObjectStore(STORE,{keyPath:'id'});
+        s.createIndex('ts','ts');
+      }
+    };
+    r.onsuccess=e=>{db=e.target.result;res()};
+    r.onerror=()=>rej(r.error);
+  });
+}
+function tx(mode){return db.transaction(STORE,mode).objectStore(STORE)}
+function put(o){return new Promise((res,rej)=>{const r=tx('readwrite').put(o);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
+function del(id){return new Promise((res,rej)=>{const r=tx('readwrite').delete(id);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
+function all(){return new Promise((res,rej)=>{const r=tx('readonly').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
+
+/* ══ parse ════════════════════════════════════════════════
+   v1 is regex-only and deliberately dumb: pull the number,
+   everything else is the merchant. LLM parsing comes later —
+   raw_text is stored so old rows can be re-parsed then.      */
+function parse(raw){
+  const s=raw.trim();
+  if(!s) return null;
+  // last standalone number wins; handles "星巴克 120" and "120 星巴克"
+  const m=s.match(/(-?\d+(?:[.,]\d+)?)(?!.*\d)/);
+  if(!m) return null;
+  const amount=parseFloat(m[1].replace(',',''));
+  if(!isFinite(amount)) return null;
+  const merchant=(s.slice(0,m.index)+s.slice(m.index+m[1].length))
+                   .replace(/\s+/g,' ').trim() || '—';
+  return {
+    id:crypto.randomUUID(),
+    ts:Date.now(),
+    amount,
+    merchant,
+    category:null,
+    raw_text:raw,
+    source:'text'
+  };
+}
+
+/* ══ dates ════════════════════════════════════════════════ */
+const dayKey=ts=>{const d=new Date(ts);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
+function weekStart(ts){ // Monday 00:00
+  const d=new Date(ts);d.setHours(0,0,0,0);
+  d.setDate(d.getDate()-((d.getDay()+6)%7));
+  return d.getTime();
+}
+const money=n=>Math.round(n).toLocaleString('en-US');
+const WD=['日','一','二','三','四','五','六'];
+function dayLabel(k){
+  const t=dayKey(Date.now());
+  if(k===t) return '今天';
+  const y=dayKey(Date.now()-864e5);
+  if(k===y) return '昨天';
+  const [Y,M,D]=k.split('-');
+  return `${+M}/${+D} 週${WD[new Date(k+'T00:00').getDay()]}`;
+}
+const hhmm=ts=>{const d=new Date(ts);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
+
+/* ══ render ═══════════════════════════════════════════════ */
+const $=id=>document.getElementById(id);
+let rows=[];
+
+async function render(){
+  rows=(await all()).sort((a,b)=>b.ts-a.ts);
+  const today=dayKey(Date.now()), w0=weekStart(Date.now());
+  $('sumToday').textContent=money(rows.filter(r=>dayKey(r.ts)===today).reduce((s,r)=>s+r.amount,0));
+  $('sumWeek').textContent =money(rows.filter(r=>r.ts>=w0).reduce((s,r)=>s+r.amount,0));
+  $('count').textContent=rows.length?rows.length+' 筆':'';
+
+  const list=$('list');
+  if(!rows.length){
+    list.innerHTML='<div class="empty">還沒有紀錄。<br>在上面打一句話就好。</div>';
+    return;
+  }
+  const groups={};
+  rows.forEach(r=>{(groups[dayKey(r.ts)] ||= []).push(r)});
+  list.innerHTML=Object.entries(groups).map(([k,rs])=>`
+    <div class="daygroup">
+      <div class="dayhead"><span>${dayLabel(k)}</span><span class="num">${money(rs.reduce((s,r)=>s+r.amount,0))}</span></div>
+      ${rs.map(r=>`
+        <div class="row" data-id="${r.id}">
+          <span class="r-name">${esc(r.merchant)}</span>
+          <span class="r-time num">${hhmm(r.ts)}</span>
+          <span class="r-amt num">${money(r.amount)}</span>
+        </div>`).join('')}
+    </div>`).join('');
+}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let toastT;
+function toast(msg){
+  const t=$('toast');t.textContent=msg;t.classList.add('on');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),1800);
+}
+
+/* ══ actions ══════════════════════════════════════════════ */
+async function add(){
+  const raw=$('inp').value;
+  const o=parse(raw);
+  if(!o){toast('要有數字才能記');return}
+  await put(o);
+  $('inp').value='';
+  await render();
+  $('inp').focus();
+}
+$('add').onclick=add;
+$('inp').addEventListener('keydown',e=>{if(e.key==='Enter')add()});
+
+$('list').addEventListener('click',async e=>{
+  const row=e.target.closest('.row');if(!row)return;
+  const r=rows.find(x=>x.id===row.dataset.id);if(!r)return;
+  if(confirm(`刪除「${r.merchant} ${money(r.amount)}」?`)){await del(r.id);await render();toast('已刪除')}
+});
+
+$('export').onclick=async()=>{
+  const data=await all();
+  const blob=new Blob([JSON.stringify({v:1,exported:new Date().toISOString(),tx:data},null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`ledger-${dayKey(Date.now())}.json`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  toast(`匯出 ${data.length} 筆`);
+};
+
+$('import').onclick=()=>$('file').click();
+$('file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{
+    const j=JSON.parse(await f.text());
+    const incoming=j.tx||j;
+    if(!Array.isArray(incoming))throw 0;
+    const have=new Set((await all()).map(r=>r.id));
+    let n=0;
+    for(const r of incoming){
+      if(!r.id||!isFinite(r.amount)||!r.ts)continue;
+      if(have.has(r.id))continue;
+      await put(r);n++;
+    }
+    await render();toast(`匯入 ${n} 筆`);
+  }catch{toast('檔案讀不了')}
+  e.target.value='';
+};
+
+/* ══ boot ═════════════════════════════════════════════════ */
+open().then(render).catch(()=>{
+  document.body.innerHTML='<div class="empty">這個瀏覽器不給用 IndexedDB。<br>如果開的是無痕視窗,換一般視窗試試。</div>';
+});
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script>
+</body>
+</html>
