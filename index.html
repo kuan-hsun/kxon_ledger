@@ -168,13 +168,20 @@
   }
   .sheet-del:active{background:#1e262d}
 
-  /* ── stats panel ────────────────────── */
-  #stats{
+  /* ── stats / bill panel ─────────────── */
+  #stats,#bill{
     position:fixed;inset:0;z-index:15;background:var(--bg);
     display:none;flex-direction:column;
     padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   }
-  #stats.on{display:flex}
+  #stats.on,#bill.on{display:flex}
+  .bill-row{display:flex;align-items:center;gap:12px;padding:12px var(--pad);border-bottom:1px solid var(--line)}
+  .bill-row.off{opacity:.38}
+  .bill-ck{width:20px;height:20px;flex:none;accent-color:var(--accent)}
+  .bill-d{font-size:12px;color:var(--dim);flex:none;width:46px}
+  .bill-desc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bill-cat{font-size:11px;color:var(--dim)}
+  .bill-amt{flex:none;letter-spacing:-.01em}
   .st-head{
     display:flex;align-items:center;gap:12px;
     padding:18px var(--pad);border-bottom:1px solid var(--line);
@@ -288,6 +295,21 @@
   </div>
   <div class="st-foot">娛樂花費 = 該月分類「娛樂」的支出，自動加總。拍賣收入與備註手動填。平衡 = 拍賣收入 − 娛樂花費。</div>
 </div>
+
+<!-- 帳單截圖匯入 -->
+<div id="bill">
+  <div class="st-head">
+    <h2>匯入帳單截圖</h2>
+    <button class="btn" id="billAll">全選/全不選</button>
+    <button class="btn" id="billClose">關閉</button>
+  </div>
+  <div class="st-scroll" id="billList"></div>
+  <div class="st-foot" style="display:flex;gap:10px;align-items:center">
+    <span class="spacer" id="billInfo"></span>
+    <button class="btn" id="billImport">匯入</button>
+  </div>
+</div>
+<input type="file" id="billFile" accept="image/*" multiple hidden>
 
 <script>
 /* ══ categories ═══════════════════════════════════════════════
@@ -715,6 +737,103 @@ async function recategorizeAll(){
   await render();scheduleSync();
   toast(rateLimited?`達速率上限,已補 ${changed} 筆,稍後再按一次`:`完成:補了 ${changed} 筆分類`);
 }
+/* ══ 帳單截圖匯入(Gemini vision) ══════════════════════════
+   讀每列的 消費日期/說明/台幣金額(忽略入帳日期),民國年轉西元,
+   順便配分類。先預覽勾選再匯入,避免繳費/回饋/負數等髒資料進來。 */
+let billRows=[];
+const JUNK=/前期|繳費|回饋|入帳|退款|溢繳|轉入|結轉|循環/;
+function fileToDataURL(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>rej(r.error);r.readAsDataURL(f)})}
+function rocToTs(s){
+  const p=String(s||'').split(/[^\d]+/).filter(Boolean).map(Number);
+  if(p.length<3)return null;
+  let[y,m,d]=p; if(y<1911)y+=1911;
+  const t=new Date(y,m-1,d,12,0,0).getTime();
+  return isFinite(t)?t:null;
+}
+const md=ts=>{const d=new Date(ts);return (d.getMonth()+1)+'/'+d.getDate()};
+async function llmVision(dataUrl){
+  const key=geminiKey();if(!key)throw new Error('沒有 AI key');
+  const [meta,b64]=dataUrl.split(',');
+  const mime=(meta.match(/data:(.*?);/)||[])[1]||'image/png';
+  const sys='這是一張信用卡帳單截圖。逐列讀出每一筆交易,每筆只取三個值:'+
+    'date=消費日期(照圖上原樣,例如 115/06/12)、desc=說明、amount=台幣金額(數字,退款/負數保留負號,去掉逗號)。'+
+    '忽略「入帳日期」欄。跳過沒有消費日期的列(例如前期應繳總額)和卡號標題列。'+
+    '再幫每筆從清單挑一個最合適的分類 category,沒有合適就用「未分類」。清單:\n'+CAT_NAMES.join('、');
+  const body={
+    system_instruction:{parts:[{text:sys}]},
+    contents:[{parts:[{inline_data:{mime_type:mime,data:b64}},{text:'輸出 JSON 陣列。'}]}],
+    generationConfig:{temperature:0,responseMimeType:'application/json',
+      responseSchema:{type:'ARRAY',items:{type:'OBJECT',
+        properties:{date:{type:'STRING'},desc:{type:'STRING'},amount:{type:'NUMBER'},
+          category:{type:'STRING',enum:[...CAT_NAMES,'未分類']}},
+        required:['date','desc','amount']}}}
+  };
+  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+GEMINI_MODEL+':generateContent',
+    {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)});
+  if(!r.ok)throw new Error('辨識失敗 '+r.status+' '+(await r.text()).slice(0,120));
+  const j=await r.json();
+  const txt=j.candidates?.[0]?.content?.parts?.[0]?.text;
+  if(!txt)throw new Error('沒讀到內容');
+  return JSON.parse(txt);
+}
+function updateBillInfo(){
+  const c=billRows.filter(b=>b.checked);
+  $('billInfo').textContent=`勾選 ${c.length} 筆 · 合計 ${money(c.reduce((s,b)=>s+b.amount,0))}`;
+  $('billImport').textContent=`匯入 ${c.length} 筆`;
+}
+function renderBill(){
+  const list=$('billList');
+  if(!billRows.length){list.innerHTML='<div class="empty">沒有讀到交易。<br>換一張更清楚的截圖試試。</div>';$('billInfo').textContent='';$('billImport').textContent='匯入';return}
+  list.innerHTML=billRows.map((b,i)=>`
+    <label class="bill-row ${b.checked?'':'off'}" data-i="${i}">
+      <input type="checkbox" class="bill-ck" ${b.checked?'checked':''}>
+      <span class="bill-d num">${b.ts?md(b.ts):'—'}</span>
+      <span class="bill-desc">${esc(b.desc)}${b.category?` <span class="bill-cat">${esc(b.category)}</span>`:''}</span>
+      <span class="bill-amt num">${money(b.amount)}</span>
+    </label>`).join('');
+  updateBillInfo();
+}
+$('billList').addEventListener('change',e=>{
+  const row=e.target.closest('.bill-row');if(!row)return;
+  const i=+row.dataset.i;billRows[i].checked=e.target.checked;
+  row.classList.toggle('off',!billRows[i].checked);updateBillInfo();
+});
+$('billAll').onclick=()=>{const any=billRows.some(b=>!b.checked);billRows.forEach(b=>b.checked=any);renderBill()};
+$('billClose').onclick=()=>$('bill').classList.remove('on');
+$('billImport').onclick=async()=>{
+  const sel=billRows.filter(b=>b.checked&&b.ts&&isFinite(b.amount));
+  if(!sel.length){toast('沒有勾選任何筆');return}
+  for(const b of sel){
+    await put({id:crypto.randomUUID(),ts:b.ts,amount:b.amount,merchant:b.desc||'—',
+      category:(b.category&&b.category!=='未分類'&&CAT_COLOR[b.category])?b.category:null,
+      raw_text:b.desc||'',source:'statement',updated:Date.now()});
+  }
+  $('bill').classList.remove('on');
+  await render();scheduleSync();
+  toast(`已匯入 ${sel.length} 筆`);
+};
+$('billFile').onchange=async e=>{
+  const files=[...e.target.files];e.target.value='';
+  if(!files.length)return;
+  billRows=[];$('bill').classList.add('on');
+  $('billList').innerHTML=`<div class="empty">辨識中…（${files.length} 張）</div>`;
+  $('billInfo').textContent='';$('billImport').textContent='';
+  try{
+    for(const f of files){
+      const rows=await llmVision(await fileToDataURL(f));
+      for(const r of rows){
+        const ts=rocToTs(r.date),amt=Number(r.amount),desc=(r.desc||'').trim();
+        billRows.push({ts,desc,amount:amt,category:r.category||null,
+          checked:!!ts&&isFinite(amt)&&amt>0&&!JUNK.test(desc)}); // 預設勾選:正數、有日期、非繳費/回饋
+      }
+    }
+    renderBill();
+  }catch(err){
+    $('billList').innerHTML='<div class="empty">辨識失敗:<br>'+esc(String(err.message||err))+'</div>';
+  }
+};
+
+/* ══ AI key ═══════════════════════════════════════════════ */
 function reflectAI(){
   const on=!!geminiKey();
   $('ai').style.color=on?'var(--accent)':'';
@@ -905,7 +1024,14 @@ $('export').onclick=async()=>{
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
   toast(`匯出 ${data.length} 筆`);
 };
-$('import').onclick=()=>$('file').click();
+$('import').onclick=()=>{
+  if(confirm('要掃「信用卡帳單截圖」嗎?\n(按「取消」= 匯入 JSON 備份檔)')){
+    if(!aiReady()){toast('掃帳單需要先設定 AI key 並連網');return}
+    $('billFile').click();
+  }else{
+    $('file').click();
+  }
+};
 $('file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
   try{
