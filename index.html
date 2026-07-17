@@ -794,19 +794,25 @@ async function driveSync(interactive){
     await uploadRemote(fid,{v:3,exported:new Date().toISOString(),tx:mTx,monthly:mMonth});
     await render();driveMark();
     if(interactive)toast('已同步 Drive');
-  }catch(e){if(interactive)toast('同步失敗:'+(e.message||e))}
+  }catch(e){
+    driveErr(e.message||(''+e));           // 背景失敗也讓按鈕顯示,方便看出原因
+    if(interactive)toast('同步失敗:'+(e.message||e));
+  }
   finally{syncing=false}
 }
 function scheduleSync(){
   if(!driveClientId())return;
   clearTimeout(syncTimer);syncTimer=setTimeout(()=>driveSync(false),2500);
 }
-function driveMark(){const b=$('drive');b.textContent='Drive ✓';b.style.color='var(--accent)';b.style.borderColor='var(--accent)'}
+let driveErrMsg='';
+function driveMark(){driveErrMsg='';const b=$('drive');b.textContent='Drive ✓';b.style.color='var(--accent)';b.style.borderColor='var(--accent)'}
+function driveErr(msg){driveErrMsg=msg;const b=$('drive');b.textContent='Drive !';b.style.color='var(--warn)';b.style.borderColor='var(--warn)'}
 function reflectDrive(){const on=!!driveClientId();const b=$('drive');
   b.textContent=on?'Drive ✓':'Drive';b.style.color=on?'var(--good)':'';b.style.borderColor=on?'var(--good)':''}
 $('drive').onclick=async()=>{
   if(driveClientId()){
-    if(!confirm('立即同步 Drive?\n(按「取消」可解除連結)')){
+    const base=driveErrMsg?('⚠ 上次同步失敗:\n'+driveErrMsg+'\n\n'):'';
+    if(!confirm(base+'立即同步 Drive?\n(按「取消」可解除連結)')){
       localStorage.removeItem('drive_client_id');localStorage.removeItem('drive_file_id');
       driveToken='';tokenClient=null;reflectDrive();toast('已解除 Drive');return;
     }
@@ -829,6 +835,8 @@ document.addEventListener('visibilitychange',()=>{
   if(driveClientId())driveSync(false);
   if(swReg)swReg.update();
 });
+// 兩邊都開著時,每 45 秒自動拉一次 Drive(資料很小,幾乎無感)
+setInterval(()=>{if(!document.hidden&&driveClientId())driveSync(false)},45000);
 
 /* ══ export / import ══════════════════════════════════════ */
 $('export').onclick=async()=>{
