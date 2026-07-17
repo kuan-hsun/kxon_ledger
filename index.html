@@ -260,8 +260,8 @@
     <input type="number" inputmode="decimal" id="sheetAmtIn">
   </div>
   <div class="sheet-date">
-    <span class="grp-label" style="margin:0">日期時間</span>
-    <input type="datetime-local" id="sheetDate">
+    <span class="grp-label" style="margin:0">日期</span>
+    <input type="date" id="sheetDate">
   </div>
   <div id="chipWrap"></div>
   <button class="sheet-del" id="sheetDel">刪除這筆</button>
@@ -427,8 +427,8 @@ function dayLabel(k){
   return `${+M}/${+D} 週${WD[new Date(k+'T00:00').getDay()]}`;
 }
 const hhmm=ts=>{const d=new Date(ts);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')};
-const dtLocal=ts=>{const d=new Date(ts),p=n=>String(n).padStart(2,'0');
-  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes())};
+const dOnly=ts=>{const d=new Date(ts),p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())};
 
 /* ══ render ═══════════════════════════════════════════════ */
 const $=id=>document.getElementById(id);
@@ -458,7 +458,6 @@ async function render(){
           <span class="r-dot" style="${col?`background:${col}`:''}"></span>
           <span class="r-name">${esc(r.merchant)}</span>
           ${r.category?`<span class="r-cat">${esc(r.category)}</span>`:''}
-          <span class="r-time num">${hhmm(r.ts)}</span>
           <span class="r-amt num">${money(r.amount)}</span>
         </div>`;}).join('')}
     </div>`).join('');
@@ -531,7 +530,7 @@ function openSheet(r){
   $('sheetName').value=r.merchant;
   $('sheetAmt').textContent=money(r.amount);
   $('sheetAmtIn').value=r.amount;
-  $('sheetDate').value=dtLocal(r.ts);
+  $('sheetDate').value=dOnly(r.ts);
   document.querySelectorAll('.chip').forEach(ch=>
     ch.classList.toggle('sel',ch.dataset.cat===r.category));
   $('scrim').classList.add('on');$('sheet').classList.add('on');
@@ -559,9 +558,12 @@ $('sheetAmtIn').addEventListener('change',async e=>{
 });
 $('sheetDate').addEventListener('change',async e=>{
   if(!sheetRow||!e.target.value)return;
-  const t=new Date(e.target.value).getTime();
-  if(!isFinite(t))return;
-  sheetRow.ts=t;
+  const [Y,M,D]=e.target.value.split('-').map(Number);
+  if(!Y||!M||!D)return;
+  const old=new Date(sheetRow.ts);
+  // 只改日期,保留原本的時分秒(維持同一天內的先後順序)
+  const nd=new Date(Y,M-1,D,old.getHours(),old.getMinutes(),old.getSeconds());
+  sheetRow.ts=nd.getTime();
   sheetRow.updated=Date.now();
   await put(sheetRow);await render();scheduleSync();
   toast('日期已改');
