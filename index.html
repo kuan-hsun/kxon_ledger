@@ -686,6 +686,35 @@ $('yrPrev').onclick=async()=>{statYear--;await renderStats()};
 $('yrNext').onclick=async()=>{statYear++;await renderStats()};
 
 /* ══ AI key ═══════════════════════════════════════════════ */
+// 把「未分類」的舊資料丟給 Gemini 批次補分類(手動分過的不碰)
+async function recategorizeAll(){
+  if(!aiReady()){toast('先設好 AI key 並連網');return}
+  const targets=(await all()).filter(r=>!r.deleted&&!r.category);
+  if(!targets.length){toast('沒有未分類的資料');return}
+  let done=0,changed=0,idx=0,rateLimited=false;
+  toast(`AI 分類中 0/${targets.length}`);
+  async function worker(){
+    while(idx<targets.length&&!rateLimited){
+      const r=targets[idx++];
+      const text=r.raw_text||((r.merchant||'')+' '+r.amount);
+      try{
+        const g=await llmParse(text);
+        const cur=(await all()).find(x=>x.id===r.id);
+        if(cur&&!cur.category){
+          let ch=false;
+          if(g.category){cur.category=g.category;ch=true}
+          if(g.merchant&&g.merchant!==cur.merchant){cur.merchant=g.merchant;ch=true}
+          if(ch){cur.source=(cur.source||'text')+'+ai';cur.updated=Date.now();await put(cur);changed++}
+        }
+      }catch(e){if(String(e.message||e).includes('429'))rateLimited=true}
+      done++;
+      if(done%5===0||done===targets.length)toast(`AI 分類中 ${done}/${targets.length}`);
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(2,targets.length)},worker));
+  await render();scheduleSync();
+  toast(rateLimited?`達速率上限,已補 ${changed} 筆,稍後再按一次`:`完成:補了 ${changed} 筆分類`);
+}
 function reflectAI(){
   const on=!!geminiKey();
   $('ai').style.color=on?'var(--accent)':'';
@@ -694,6 +723,7 @@ function reflectAI(){
 }
 $('ai').onclick=()=>{
   const cur=geminiKey();
+  if(cur&&confirm('要用 AI 把「未分類」的舊資料補上分類嗎?\n(按「取消」可改或清除 key)')){recategorizeAll();return}
   const v=prompt('貼上 Gemini API key,語音/文字會自動分類。\n免費額度個人夠用(1500次/天)。留空可關閉。\n\n去 aistudio.google.com/apikey 拿 key。',cur);
   if(v===null)return;
   const k=v.trim();
