@@ -1,10 +1,13 @@
 /* Bump CACHE when you change index.html, or the phone keeps the old copy. */
-const CACHE = 'ledger-v4';
+const CACHE = 'ledger-v5';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
+/* New SW installs but WAITS — the page shows an "update" prompt and only
+   when the user taps it do we skipWaiting + reload. Controlled, no surprise. */
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
 });
+self.addEventListener('message', e => { if (e.data === 'SKIP_WAITING') self.skipWaiting(); });
 
 self.addEventListener('activate', e => {
   e.waitUntil(
