@@ -334,13 +334,27 @@ const ENT_CAT='娛樂'; // 統計表「娛樂花費」的來源分類
    給自己用:key 放 localStorage,瀏覽器直接打 Gemini。
    免費額度(1500次/天)個人綽綽有餘。沒 key 或離線就走正規解析。
    註:免費層的內容可能被拿去訓練,介意就換付費層。            */
-const GEMINI_MODEL='gemini-2.5-flash-lite';
+/* 型號會被 Google 淘汰,所以放一串候選:先用別名(自動指向最新平價 lite),
+   遇到 404(型號不存在)就換下一個,成功的記在 localStorage 下次直接用。 */
+const GEMINI_MODELS=['gemini-flash-lite-latest','gemini-3.1-flash-lite','gemini-flash-latest','gemini-3.5-flash'];
 const geminiKey=()=>localStorage.getItem('gemini_key')||'';
 const aiReady=()=>!!geminiKey()&&navigator.onLine;
+const geminiModel=()=>localStorage.getItem('gemini_model')||GEMINI_MODELS[0];
+async function geminiGenerate(body){
+  const key=geminiKey();if(!key)throw new Error('沒有 AI key');
+  const order=[geminiModel(),...GEMINI_MODELS.filter(m=>m!==geminiModel())];
+  let last;
+  for(const model of order){
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':generateContent',
+      {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)});
+    if(r.ok){localStorage.setItem('gemini_model',model);return r.json()}
+    if(r.status===404){last=new Error('型號不可用:'+model);continue} // 換下一個候選
+    throw new Error('AI 失敗 '+r.status+' '+(await r.text()).slice(0,140));
+  }
+  throw last||new Error('沒有可用的 Gemini 型號');
+}
 
 async function llmParse(raw){
-  const key=geminiKey();
-  if(!key) throw new Error('no key');
   const sys='你是記帳助手。使用者用中文口語或簡短文字描述「一筆支出」。'+
     '請抽取:商家或項目名稱(merchant)、金額(amount,阿拉伯數字,像「一百二」要轉成120)、'+
     '以及最合適的分類(category)。category 必須從這個清單挑一個,真的沒有合適的就填「未分類」:\n'+
@@ -362,13 +376,7 @@ async function llmParse(raw){
       }
     }
   };
-  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+GEMINI_MODEL+':generateContent',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','x-goog-api-key':key},
-    body:JSON.stringify(body)
-  });
-  if(!r.ok) throw new Error('http '+r.status);
-  const j=await r.json();
+  const j=await geminiGenerate(body);
   const txt=j.candidates?.[0]?.content?.parts?.[0]?.text;
   if(!txt) throw new Error('empty');
   const o=JSON.parse(txt);
@@ -752,7 +760,6 @@ function rocToTs(s){
 }
 const md=ts=>{const d=new Date(ts);return (d.getMonth()+1)+'/'+d.getDate()};
 async function llmVision(dataUrl){
-  const key=geminiKey();if(!key)throw new Error('沒有 AI key');
   const [meta,b64]=dataUrl.split(',');
   const mime=(meta.match(/data:(.*?);/)||[])[1]||'image/png';
   const sys='這是一張信用卡帳單截圖。逐列讀出每一筆交易,每筆只取三個值:'+
@@ -768,10 +775,7 @@ async function llmVision(dataUrl){
           category:{type:'STRING',enum:[...CAT_NAMES,'未分類']}},
         required:['date','desc','amount']}}}
   };
-  const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+GEMINI_MODEL+':generateContent',
-    {method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)});
-  if(!r.ok)throw new Error('辨識失敗 '+r.status+' '+(await r.text()).slice(0,120));
-  const j=await r.json();
+  const j=await geminiGenerate(body);
   const txt=j.candidates?.[0]?.content?.parts?.[0]?.text;
   if(!txt)throw new Error('沒讀到內容');
   return JSON.parse(txt);
