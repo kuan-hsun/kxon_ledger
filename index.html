@@ -710,19 +710,24 @@ const driveClientId=()=>localStorage.getItem('drive_client_id')||'';
 const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
 
 function gisReady(){return !!(window.google&&google.accounts&&google.accounts.oauth2)}
+let _tokRes=null,_tokRej=null;
 function initTokenClient(){
   if(tokenClient||!driveClientId()||!gisReady())return tokenClient;
-  tokenClient=google.accounts.oauth2.initTokenClient({client_id:driveClientId(),scope:DRIVE_SCOPE,callback:()=>{}});
+  tokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:driveClientId(),scope:DRIVE_SCOPE,
+    callback:resp=>{
+      if(resp&&resp.access_token){driveToken=resp.access_token;tokenExp=Date.now()+((resp.expires_in||3000)*1000);_tokRes&&_tokRes(driveToken)}
+      else{_tokRej&&_tokRej(new Error((resp&&resp.error)||'授權失敗'))}
+    },
+    error_callback:err=>{_tokRej&&_tokRej(new Error('授權視窗未開啟('+(err&&(err.type||err.message)||'popup 被擋')+'),請改用 Safari 分頁授權'))}
+  });
   return tokenClient;
 }
 function getToken(interactive){
   return new Promise((res,rej)=>{
     const tc=initTokenClient();
-    if(!tc){rej(new Error('Google 登入尚未載入'));return}
-    tc.callback=resp=>{
-      if(resp&&resp.access_token){driveToken=resp.access_token;tokenExp=Date.now()+((resp.expires_in||3000)*1000);res(driveToken)}
-      else rej(new Error((resp&&resp.error)||'授權失敗'));
-    };
+    if(!tc){rej(new Error('Google 登入尚未載入(可能被擋或未連網)'));return}
+    _tokRes=res;_tokRej=rej;
     try{tc.requestAccessToken({prompt:interactive?'consent':''})}catch(e){rej(e)}
   });
 }
@@ -738,12 +743,16 @@ async function driveFetch(url,opts){
   if(r.status===401){t=await ensureToken(true);r=await go(t)}
   return r;
 }
+async function apiErr(r,what){
+  let t='';try{t=(await r.text()).slice(0,160)}catch{}
+  return new Error(what+' '+r.status+' '+t);
+}
 async function findFile(){
   const cached=localStorage.getItem('drive_file_id');
   if(cached)return cached;
   const q=encodeURIComponent("name='ledger.json' and trashed=false");
   const r=await driveFetch('https://www.googleapis.com/drive/v3/files?q='+q+'&spaces=drive&fields=files(id,modifiedTime)&orderBy=modifiedTime desc');
-  if(!r.ok)return null;
+  if(!r.ok)throw await apiErr(r,'查詢失敗');
   const j=await r.json();const f=j.files&&j.files[0];
   if(f){localStorage.setItem('drive_file_id',f.id);return f.id}
   return null;
@@ -751,7 +760,7 @@ async function findFile(){
 async function downloadRemote(id){
   const r=await driveFetch('https://www.googleapis.com/drive/v3/files/'+id+'?alt=media');
   if(r.status===404){localStorage.removeItem('drive_file_id');return null}
-  if(!r.ok)return null;
+  if(!r.ok)throw await apiErr(r,'下載失敗');
   try{return await r.json()}catch{return null}
 }
 async function uploadRemote(id,payload){
@@ -759,7 +768,8 @@ async function uploadRemote(id,payload){
   if(id){
     const r=await driveFetch('https://www.googleapis.com/upload/drive/v3/files/'+id+'?uploadType=media',
       {method:'PATCH',headers:{'Content-Type':'application/json'},body});
-    return r.ok?id:null;
+    if(!r.ok)throw await apiErr(r,'更新失敗');
+    return id;
   }
   const b='b'+Math.random().toString(36).slice(2);
   const meta={name:'ledger.json',mimeType:'application/json'};
@@ -767,10 +777,11 @@ async function uploadRemote(id,payload){
     +'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+body+'\r\n--'+b+'--';
   const r=await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
     {method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body:multipart});
-  if(!r.ok)return null;
+  if(!r.ok)throw await apiErr(r,'建立失敗');
   const j=await r.json();
-  if(j.id){localStorage.setItem('drive_file_id',j.id);return j.id}
-  return null;
+  if(!j.id)throw new Error('建立失敗:回應沒有檔案 id');
+  localStorage.setItem('drive_file_id',j.id);
+  return j.id;
 }
 function mergeById(a,b,key){
   const m=new Map();

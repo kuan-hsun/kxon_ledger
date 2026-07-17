@@ -1,5 +1,5 @@
 /* Bump CACHE when you change index.html, or the phone keeps the old copy. */
-const CACHE = 'ledger-v7';
+const CACHE = 'ledger-v8';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 /* New SW installs but WAITS — the page shows an "update" prompt and only
