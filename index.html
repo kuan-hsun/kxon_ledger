@@ -6,8 +6,11 @@
 <meta name="theme-color" content="#101418">
 <title>記帳</title>
 <link rel="manifest" href="manifest.json">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="記帳">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <script src="https://accounts.google.com/gsi/client" async></script>
 <style>
@@ -252,6 +255,10 @@
   <div class="sheet-date">
     <span class="grp-label" style="margin:0">名稱</span>
     <input type="text" id="sheetName" autocomplete="off" autocapitalize="off">
+  </div>
+  <div class="sheet-date">
+    <span class="grp-label" style="margin:0">金額</span>
+    <input type="number" inputmode="decimal" id="sheetAmtIn">
   </div>
   <div class="sheet-date">
     <span class="grp-label" style="margin:0">日期時間</span>
@@ -524,6 +531,7 @@ function openSheet(r){
   sheetRow=r;
   $('sheetName').value=r.merchant;
   $('sheetAmt').textContent=money(r.amount);
+  $('sheetAmtIn').value=r.amount;
   $('sheetDate').value=dtLocal(r.ts);
   document.querySelectorAll('.chip').forEach(ch=>
     ch.classList.toggle('sel',ch.dataset.cat===r.category));
@@ -537,6 +545,18 @@ $('sheetName').addEventListener('change',async e=>{
   sheetRow.updated=Date.now();
   await put(sheetRow);await render();scheduleSync();
   toast('名稱已改');
+});
+$('sheetAmtIn').addEventListener('change',async e=>{
+  if(!sheetRow)return;
+  const v=parseFloat(e.target.value);
+  if(!isFinite(v)){e.target.value=sheetRow.amount;return}
+  if(v===sheetRow.amount)return;
+  sheetRow.amount=v;
+  sheetRow.updated=Date.now();
+  await put(sheetRow);
+  $('sheetAmt').textContent=money(v);
+  await render();scheduleSync();
+  toast('金額已改');
 });
 $('sheetDate').addEventListener('change',async e=>{
   if(!sheetRow||!e.target.value)return;

@@ -1,6 +1,6 @@
 /* Bump CACHE when you change index.html, or the phone keeps the old copy. */
-const CACHE = 'ledger-v5';
-const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE = 'ledger-v6';
+const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 
 /* New SW installs but WAITS — the page shows an "update" prompt and only
    when the user taps it do we skipWaiting + reload. Controlled, no surprise. */
