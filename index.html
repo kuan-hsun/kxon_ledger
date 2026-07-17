@@ -12,7 +12,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="記帳">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script src="https://accounts.google.com/gsi/client" async></script>
 <style>
   :root{
     --bg:#101418;
@@ -705,42 +704,52 @@ $('ai').onclick=()=>{
    純前端:用 Google Identity Services 拿 access token(drive.file
    權限,只碰 App 自己建的 ledger.json)。合併規則:同 id 比 updated,
    新的蓋舊的;刪除是軟刪除 tombstone,所以多裝置不會又跑回來。      */
-let tokenClient=null,driveToken='',tokenExp=0,syncing=false,syncTimer=null;
+let driveToken='',tokenExp=0,syncing=false,syncTimer=null,driveAuthErr='';
 const driveClientId=()=>localStorage.getItem('drive_client_id')||'';
 const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+const TOKEN_KEY='drive_token',TOKEN_EXP='drive_token_exp';
+const redirectUri=()=>(location.origin+location.pathname).replace(/index\.html$/,'');
 
-function gisReady(){return !!(window.google&&google.accounts&&google.accounts.oauth2)}
-let _tokRes=null,_tokRej=null;
-function initTokenClient(){
-  if(tokenClient||!driveClientId()||!gisReady())return tokenClient;
-  tokenClient=google.accounts.oauth2.initTokenClient({
-    client_id:driveClientId(),scope:DRIVE_SCOPE,
-    callback:resp=>{
-      if(resp&&resp.access_token){driveToken=resp.access_token;tokenExp=Date.now()+((resp.expires_in||3000)*1000);_tokRes&&_tokRes(driveToken)}
-      else{_tokRej&&_tokRej(new Error((resp&&resp.error)||'授權失敗'))}
-    },
-    error_callback:err=>{_tokRej&&_tokRej(new Error('授權視窗未開啟('+(err&&(err.type||err.message)||'popup 被擋')+'),請改用 Safari 分頁授權'))}
-  });
-  return tokenClient;
+/* 用「整頁跳轉」的 OAuth implicit flow,不靠 popup(手機/主畫面 App 都能授權)。
+   授權後 Google 會把 token 放在網址 #hash 導回,開機時解析並存起來。         */
+function storedToken(){
+  const t=localStorage.getItem(TOKEN_KEY),e=+localStorage.getItem(TOKEN_EXP)||0;
+  return (t&&Date.now()<e-60000)?t:'';
 }
-function getToken(interactive){
-  return new Promise((res,rej)=>{
-    const tc=initTokenClient();
-    if(!tc){rej(new Error('Google 登入尚未載入(可能被擋或未連網)'));return}
-    _tokRes=res;_tokRej=rej;
-    try{tc.requestAccessToken({prompt:interactive?'consent':''})}catch(e){rej(e)}
-  });
+function beginAuth(silent){
+  const p=new URLSearchParams({client_id:driveClientId(),redirect_uri:redirectUri(),
+    response_type:'token',scope:DRIVE_SCOPE,include_granted_scopes:'true',
+    state:'ledger',prompt:silent?'none':'consent'});
+  location.href='https://accounts.google.com/o/oauth2/v2/auth?'+p.toString();
+}
+function consumeAuthHash(){
+  const hash=location.hash||'';
+  if(hash.indexOf('access_token=')>=0){
+    const h=new URLSearchParams(hash.slice(1));
+    const t=h.get('access_token'),exp=+(h.get('expires_in')||3600);
+    if(t){localStorage.setItem(TOKEN_KEY,t);localStorage.setItem(TOKEN_EXP,Date.now()+exp*1000);driveToken=t;tokenExp=Date.now()+exp*1000}
+    sessionStorage.removeItem('drive_silent_tried');
+    history.replaceState(null,'',redirectUri()); // 把 token 從網址清掉
+    return !!t;
+  }
+  if(hash.indexOf('error=')>=0){
+    const h=new URLSearchParams(hash.slice(1));
+    driveAuthErr='Google 授權被拒:'+(h.get('error')||'');
+    history.replaceState(null,'',redirectUri());
+  }
+  return false;
 }
 async function ensureToken(interactive){
-  if(driveToken&&Date.now()<tokenExp-60000)return driveToken;
-  return getToken(interactive);
+  const s=storedToken();
+  if(s){driveToken=s;return s}
+  if(interactive){beginAuth(false);throw new Error('轉到 Google 授權中…')} // 頁面即將跳走
+  throw new Error('尚未授權(請按 Drive)');
 }
 async function driveFetch(url,opts){
   opts=opts||{};
-  let t=await ensureToken(false);
-  const go=tok=>fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:'Bearer '+tok}});
-  let r=await go(t);
-  if(r.status===401){t=await ensureToken(true);r=await go(t)}
+  const t=await ensureToken(false);
+  const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:'Bearer '+t}});
+  if(r.status===401){localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(TOKEN_EXP);driveToken='';throw new Error('授權過期,請按 Drive 重新連結');}
   return r;
 }
 async function apiErr(r,what){
@@ -824,22 +833,26 @@ $('drive').onclick=async()=>{
   if(driveClientId()){
     const base=driveErrMsg?('⚠ 上次同步失敗:\n'+driveErrMsg+'\n\n'):'';
     if(!confirm(base+'立即同步 Drive?\n(按「取消」可解除連結)')){
-      localStorage.removeItem('drive_client_id');localStorage.removeItem('drive_file_id');
-      driveToken='';tokenClient=null;reflectDrive();toast('已解除 Drive');return;
+      ['drive_client_id','drive_file_id',TOKEN_KEY,TOKEN_EXP].forEach(k=>localStorage.removeItem(k));
+      driveToken='';reflectDrive();toast('已解除 Drive');return;
     }
-    toast('同步中…');await driveSync(true);return;
+    if(storedToken()){toast('同步中…');await driveSync(true)}
+    else{toast('轉到 Google 授權…');beginAuth(false)} // token 過期 → 重新授權
+    return;
   }
-  const v=prompt('貼上 Google OAuth Client ID(結尾是 .apps.googleusercontent.com)。\n設定步驟我另外給你。留空取消。','');
+  const v=prompt('貼上 Google OAuth Client ID(結尾是 .apps.googleusercontent.com)。\n按下後會轉到 Google 授權再自動跳回。留空取消。','');
   if(v===null)return;const k=v.trim();if(!k)return;
-  localStorage.setItem('drive_client_id',k);tokenClient=null;reflectDrive();
-  toast('連線中…');await driveSync(true);
+  localStorage.setItem('drive_client_id',k);reflectDrive();
+  toast('轉到 Google 授權…');beginAuth(false);
 };
 function bootSync(){
+  if(driveAuthErr)driveErr(driveAuthErr);
   if(!driveClientId())return;
-  let n=0;const t=setInterval(()=>{
-    if(gisReady()){clearInterval(t);driveSync(false)}
-    else if(++n>25)clearInterval(t);
-  },300);
+  if(storedToken()){driveSync(false);return}       // 有有效 token → 直接同步
+  if(!sessionStorage.getItem('drive_silent_tried')){ // 過期 → 靜默續期一次(快速整頁跳轉),失敗不重試
+    sessionStorage.setItem('drive_silent_tried','1');
+    beginAuth(true);
+  }
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)return;
@@ -882,6 +895,7 @@ $('file').onchange=async e=>{
 };
 
 /* ══ boot ═════════════════════════════════════════════════ */
+consumeAuthHash();   // 從 Google 授權導回時,先把網址上的 token 收好
 buildChips();
 reflectAI();
 reflectDrive();
