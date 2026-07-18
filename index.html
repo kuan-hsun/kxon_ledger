@@ -12,6 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="記帳">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script src="https://accounts.google.com/gsi/client" async></script>
 <style>
   :root{
     --bg:#101418;
@@ -947,17 +948,55 @@ function consumeAuthHash(){
   }
   return false;
 }
+/* GIS token client:電腦上能用「隱藏 iframe」靜默續期(不跳轉),
+   首次授權用彈窗;彈窗被擋(手機)時自動退回整頁跳轉。          */
+let tokenClient=null,_tres=null,_trej=null;
+function gisReady(){return !!(window.google&&google.accounts&&google.accounts.oauth2)}
+function initTokenClient(){
+  if(tokenClient||!driveClientId()||!gisReady())return tokenClient;
+  tokenClient=google.accounts.oauth2.initTokenClient({
+    client_id:driveClientId(),scope:DRIVE_SCOPE,
+    callback:resp=>{
+      if(resp&&resp.access_token){
+        driveToken=resp.access_token;tokenExp=Date.now()+((resp.expires_in||3000)*1000);
+        localStorage.setItem(TOKEN_KEY,driveToken);localStorage.setItem(TOKEN_EXP,tokenExp);
+        const f=_tres;_tres=_trej=null;f&&f(driveToken);
+      }else{const f=_trej;_tres=_trej=null;f&&f(new Error((resp&&resp.error)||'授權失敗'))}
+    },
+    error_callback:err=>{const f=_trej;_tres=_trej=null;f&&f(new Error((err&&(err.type||err.message))||'popup_failed'))}
+  });
+  return tokenClient;
+}
+function gisToken(interactive){
+  return new Promise((res,rej)=>{
+    const tc=initTokenClient();
+    if(!tc){rej(new Error('gis-not-ready'));return}
+    _tres=res;_trej=rej;
+    try{tc.requestAccessToken({prompt:interactive?'consent':''})}catch(e){rej(e)}
+  });
+}
 async function ensureToken(interactive){
   const s=storedToken();
   if(s){driveToken=s;return s}
+  if(gisReady()){
+    try{return await gisToken(false)}   // 靜默續期(iframe,無畫面)
+    catch(e){ if(!interactive) throw new Error('尚未授權'); }
+    try{return await gisToken(true)}     // 首次/需互動 → 彈窗(電腦可用)
+    catch(e){ /* 彈窗被擋(手機) → 落到整頁跳轉 */ }
+  }
   if(interactive){beginAuth(false);throw new Error('轉到 Google 授權中…')} // 頁面即將跳走
-  throw new Error('尚未授權(請按 Drive)');
+  throw new Error('尚未授權');
 }
 async function driveFetch(url,opts){
   opts=opts||{};
-  const t=await ensureToken(false);
-  const r=await fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:'Bearer '+t}});
-  if(r.status===401){localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(TOKEN_EXP);driveToken='';throw new Error('授權過期,請按 Drive 重新連結');}
+  let t=await ensureToken(false);
+  const go=tok=>fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:'Bearer '+tok}});
+  let r=await go(t);
+  if(r.status===401){ // token 失效 → 清掉,靜默換新再試一次
+    localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(TOKEN_EXP);driveToken='';
+    try{t=await ensureToken(false)}catch(e){throw new Error('授權過期,請按 Drive 重新連結');}
+    r=await go(t);
+  }
   return r;
 }
 async function apiErr(r,what){
@@ -1044,23 +1083,21 @@ $('drive').onclick=async()=>{
       ['drive_client_id','drive_file_id',TOKEN_KEY,TOKEN_EXP].forEach(k=>localStorage.removeItem(k));
       driveToken='';reflectDrive();toast('已解除 Drive');return;
     }
-    if(storedToken()){toast('同步中…');await driveSync(true)}
-    else{toast('轉到 Google 授權…');beginAuth(false)} // token 過期 → 重新授權
+    toast('同步中…');await driveSync(true); // 電腦:靜默或彈窗續期;手機彈窗被擋才跳轉
     return;
   }
-  const v=prompt('貼上 Google OAuth Client ID(結尾是 .apps.googleusercontent.com)。\n按下後會轉到 Google 授權再自動跳回。留空取消。','');
+  const v=prompt('貼上 Google OAuth Client ID(結尾是 .apps.googleusercontent.com)。\n電腦會用彈窗授權;手機若被擋會改整頁跳轉。留空取消。','');
   if(v===null)return;const k=v.trim();if(!k)return;
   localStorage.setItem('drive_client_id',k);reflectDrive();
-  toast('轉到 Google 授權…');beginAuth(false);
+  toast('連線中…');await driveSync(true);
 };
 function bootSync(){
   if(driveAuthErr)driveErr(driveAuthErr);
   if(!driveClientId())return;
-  if(storedToken()){driveSync(false);return}       // 有有效 token → 直接同步
-  if(!sessionStorage.getItem('drive_silent_tried')){ // 過期 → 靜默續期一次(快速整頁跳轉),失敗不重試
-    sessionStorage.setItem('drive_silent_tried','1');
-    beginAuth(true);
-  }
+  // 等 GIS 載好再同步(電腦可靜默續期,不跳轉);最多等 5 秒,有 stored token 也能先同步
+  let n=0;const t=setInterval(()=>{
+    if(gisReady()||++n>25){clearInterval(t);driveSync(false)}
+  },200);
 }
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)return;
