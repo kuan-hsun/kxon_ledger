@@ -176,12 +176,13 @@
     padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
   }
   #stats.on,#bill.on{display:flex}
-  .bill-row{display:flex;align-items:center;gap:12px;padding:12px var(--pad);border-bottom:1px solid var(--line)}
-  .bill-row.off{opacity:.38}
+  .bill-row{display:flex;align-items:center;gap:9px;padding:12px var(--pad);border-bottom:1px solid var(--line)}
+  .bill-row.off{opacity:.4}
   .bill-ck{width:20px;height:20px;flex:none;accent-color:var(--accent)}
-  .bill-d{font-size:12px;color:var(--dim);flex:none;width:46px}
-  .bill-desc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .bill-cat{font-size:11px;color:var(--dim)}
+  .bill-d{font-size:12px;color:var(--dim);flex:none;width:44px}
+  .bill-desc{flex:1;min-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .bill-cat-sel{flex:none;max-width:104px;background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 6px;font:inherit;font-size:12px;outline:none}
+  .bill-cat-sel:focus{border-color:var(--accent)}
   .bill-amt{flex:none;letter-spacing:-.01em}
   .st-head{
     display:flex;align-items:center;gap:12px;
@@ -300,7 +301,7 @@
       <tbody id="stBody"></tbody>
     </table>
   </div>
-  <div class="st-foot">消費 = 該月分類「娛樂、衣物」的支出，自動加總。拍賣收入與備註手動填。平衡 = 拍賣收入 − 消費。</div>
+  <div class="st-foot">消費 = 分類「娛樂、衣物」的支出；拍賣收入 = 分類「拍賣收入」的收入，皆自動加總。備註手動填。平衡 = 拍賣收入 − 消費。</div>
 </div>
 
 <!-- 帳單截圖匯入 -->
@@ -323,7 +324,7 @@
    支出/投資/保險分類。收入不在這裡記,收入(拍賣)在統計表填。
    顏色沿用試算表的色帶。key 就是顯示名。                        */
 const C={pink:'#f0bfb8',blue:'#bcd4dc',brown:'#7a4a24',dred:'#9e1b2f',
-         yellow:'#efdf9e',plight:'#d6c4ef',pdark:'#4a2a86'};
+         yellow:'#efdf9e',plight:'#d6c4ef',pdark:'#4a2a86',green:'#a9dc9a'};
 const CAT_GROUPS=[
   {g:'飲食 · 個人', items:[['外食',C.pink],['保健食品',C.pink],['零食飲料',C.pink],['衣物',C.pink],['鞋子',C.pink],['理髮',C.pink],['書籍',C.pink],['購物',C.pink]]},
   {g:'居家 · 水電', items:[['日用品',C.blue],['水費',C.blue],['電費',C.blue],['手機費',C.blue],['網路費',C.blue],['天然氣',C.blue],['修繕',C.blue],['房屋基金',C.pdark]]},
@@ -333,9 +334,17 @@ const CAT_GROUPS=[
   {g:'保險 · 醫療', items:[['醫療',C.pink],['富邦儲蓄壽險(年)',C.pink],['全球壽險(年)',C.pink],['第一金癌症險',C.pink],['遠雄醫療險(年)',C.pink],['國民年金或健保',C.pink]]},
   {g:'投資 · 其他', items:[['定期定額',C.yellow],['加碼投資',C.yellow],['創業投入',C.plight],['代墊',C.brown],['預期外支出',C.dred]]},
 ];
-const CAT_COLOR={};CAT_GROUPS.forEach(gr=>gr.items.forEach(([k,c])=>CAT_COLOR[k]=c));
-const CAT_NAMES=Object.keys(CAT_COLOR);
-const ENT_CATS=['娛樂','衣物']; // 統計表「消費」納入的分類(要擴充加在這裡就好)
+// 收入分類(綠色)。分類屬於這群 = 這筆算收入(綠色、不計入花費合計)。
+const INCOME_GROUP={g:'收入', items:[['拍賣收入',C.green],['薪資收入',C.green],['外包收入',C.green],['投資收益',C.green],['其他收入',C.green]]};
+const CAT_GROUPS_ALL=[...CAT_GROUPS,INCOME_GROUP];
+const CAT_COLOR={};CAT_GROUPS_ALL.forEach(gr=>gr.items.forEach(([k,c])=>CAT_COLOR[k]=c));
+const EXP_NAMES=CAT_GROUPS.flatMap(gr=>gr.items.map(x=>x[0]));   // 支出分類(給 AI 分類支出用)
+const INC_NAMES=INCOME_GROUP.items.map(x=>x[0]);                 // 收入分類
+const CAT_NAMES=[...EXP_NAMES,...INC_NAMES];
+const INCOME_SET=new Set(INC_NAMES);
+const isIncome=r=>INCOME_SET.has(r&&r.category);
+const AUC_CAT='拍賣收入';           // 統計表「拍賣收入」的來源分類
+const ENT_CATS=['娛樂','衣物'];      // 統計表「消費」納入的分類(要擴充加在這裡就好)
 
 /* ══ LLM (Gemini) ═════════════════════════════════════════
    給自己用:key 放 localStorage,瀏覽器直接打 Gemini。
@@ -365,7 +374,7 @@ async function llmParse(raw){
   const sys='你是記帳助手。使用者用中文口語或簡短文字描述「一筆支出」。'+
     '請抽取:商家或項目名稱(merchant)、金額(amount,阿拉伯數字,像「一百二」要轉成120)、'+
     '以及最合適的分類(category)。category 必須從這個清單挑一個,真的沒有合適的就填「未分類」:\n'+
-    CAT_NAMES.join('、');
+    EXP_NAMES.join('、');
   const body={
     system_instruction:{parts:[{text:sys}]},
     contents:[{parts:[{text:raw}]}],
@@ -377,7 +386,7 @@ async function llmParse(raw){
         properties:{
           merchant:{type:'STRING'},
           amount:{type:'NUMBER'},
-          category:{type:'STRING',enum:[...CAT_NAMES,'未分類']}
+          category:{type:'STRING',enum:[...EXP_NAMES,'未分類']}
         },
         required:['merchant','amount','category']
       }
@@ -474,8 +483,9 @@ let rows=[];
 async function render(){
   rows=(await all()).filter(r=>!r.deleted).sort((a,b)=>b.ts-a.ts);
   const today=dayKey(Date.now()), w0=weekStart(Date.now());
-  $('sumToday').textContent=money(rows.filter(r=>dayKey(r.ts)===today).reduce((s,r)=>s+r.amount,0));
-  $('sumWeek').textContent =money(rows.filter(r=>r.ts>=w0).reduce((s,r)=>s+r.amount,0));
+  const spend=rows.filter(r=>!isIncome(r)); // 花費合計只算支出,不含收入
+  $('sumToday').textContent=money(spend.filter(r=>dayKey(r.ts)===today).reduce((s,r)=>s+r.amount,0));
+  $('sumWeek').textContent =money(spend.filter(r=>r.ts>=w0).reduce((s,r)=>s+r.amount,0));
   $('count').textContent=rows.length?rows.length+' 筆':'';
 
   const list=$('list');
@@ -487,15 +497,15 @@ async function render(){
   rows.forEach(r=>{(groups[dayKey(r.ts)] ||= []).push(r)});
   list.innerHTML=Object.entries(groups).map(([k,rs])=>`
     <div class="daygroup">
-      <div class="dayhead"><span>${dayLabel(k)}</span><span class="num">${money(rs.reduce((s,r)=>s+r.amount,0))}</span></div>
+      <div class="dayhead"><span>${dayLabel(k)}</span><span class="num">${money(rs.filter(r=>!isIncome(r)).reduce((s,r)=>s+r.amount,0))}</span></div>
       ${rs.map(r=>{
-        const col=r.category?CAT_COLOR[r.category]:null;
+        const col=r.category?CAT_COLOR[r.category]:null, inc=isIncome(r);
         return `
         <div class="row" data-id="${r.id}">
           <span class="r-dot" style="${col?`background:${col}`:''}"></span>
           <span class="r-name">${esc(r.merchant)}</span>
           ${r.category?`<span class="r-cat">${esc(r.category)}</span>`:''}
-          <span class="r-amt num">${money(r.amount)}</span>
+          <span class="r-amt num" style="${inc?'color:var(--good)':''}">${inc?'+':''}${money(r.amount)}</span>
         </div>`;}).join('')}
     </div>`).join('');
 }
@@ -556,7 +566,7 @@ $('inp').addEventListener('keydown',e=>{if(e.key==='Enter')add()});
 /* ══ category / delete sheet ══════════════════════════════ */
 let sheetRow=null;
 function buildChips(){
-  $('chipWrap').innerHTML=CAT_GROUPS.map(gr=>`
+  $('chipWrap').innerHTML=CAT_GROUPS_ALL.map(gr=>`
     <div class="grp-label">${gr.g}</div>
     <div class="chips">${gr.items.map(([k,c])=>
       `<button class="chip" data-cat="${esc(k)}"><span class="cd" style="background:${c}"></span>${esc(k)}</button>`
@@ -670,28 +680,30 @@ let monthMap={}; // ym -> {auction,note}
 async function loadMonths(){
   monthMap={};(await allMonths()).forEach(m=>monthMap[m.ym]={auction:m.auction||0,note:m.note||''});
 }
-function entSpend(){ // ym -> 消費(娛樂+衣物)
+function sumByYm(pred){ // ym -> 符合條件的金額加總
   const map={};
-  rows.forEach(r=>{if(ENT_CATS.includes(r.category)){const k=ymKey(r.ts);map[k]=(map[k]||0)+r.amount}});
+  rows.forEach(r=>{if(pred(r)){const k=ymKey(r.ts);map[k]=(map[k]||0)+r.amount}});
   return map;
 }
+const entSpend=()=>sumByYm(r=>ENT_CATS.includes(r.category)); // 消費(娛樂+衣物)
+const aucIncome=()=>sumByYm(r=>r.category===AUC_CAT);          // 拍賣收入(自動加總)
 async function renderStats(){
   await loadMonths();
-  const ent=entSpend();
+  const ent=entSpend(),auc=aucIncome();
   $('yrLabel').textContent=statYear;
   let tE=0,tA=0;
   let html='';
   for(let mo=1;mo<=12;mo++){
     const ym=statYear+'-'+String(mo).padStart(2,'0');
     const e=Math.round(ent[ym]||0);
-    const a=Math.round(monthMap[ym]?.auction||0);
+    const a=Math.round(auc[ym]||0);
     const note=monthMap[ym]?.note||'';
     const bal=a-e;
     tE+=e;tA+=a;
     html+=`<tr>
       <td class="ym num">${ym}</td>
       <td class="ent num">${e?money(e):'—'}</td>
-      <td class="auc"><input type="number" inputmode="numeric" class="num" data-ym="${ym}" data-f="auction" value="${a||''}" placeholder="0"></td>
+      <td class="auc num">${a?money(a):'—'}</td>
       <td class="bal num ${bal>=0?'pos':'neg'}">${(a||e)?money(bal):'—'}</td>
       <td><input type="text" class="note" data-ym="${ym}" data-f="note" value="${esc(note)}" placeholder="備註"></td>
     </tr>`;
@@ -780,8 +792,9 @@ async function llmVision(dataUrl){
     'desc=說明/摘要(把主說明和下面的小字合在一起,例如「委代入 SHOPEE」「電費」)、'+
     'amount=台幣金額的數字(取絕對值,不要正負號,去掉逗號)、'+
     'kind=這筆是支出還是收入:銀行明細裡扣款/負數是 expense、入帳/正數(例如蝦皮撥款「委代入 SHOPEE」)是 income;信用卡的消費是 expense、回饋或退款是 income。'+
-    '若 kind 是 expense,再從清單挑一個最合適的分類 category(收入不用,填「未分類」)。'+
-    '忽略「入帳日期」欄。跳過沒有日期的列(例如前期應繳總額)和純標題列(例如卡號)。清單:\n'+CAT_NAMES.join('、');
+    'category=從清單挑一個最合適的分類。支出用支出類、收入用收入類(蝦皮/賣場撥款→拍賣收入);真的沒有就填「未分類」。'+
+    '忽略「入帳日期」欄。跳過沒有日期的列(例如前期應繳總額)和純標題列(例如卡號)。'+
+    '支出分類:'+EXP_NAMES.join('、')+'\n收入分類:'+INC_NAMES.join('、');
   const body={
     system_instruction:{parts:[{text:sys}]},
     contents:[{parts:[{inline_data:{mime_type:mime,data:b64}},{text:'輸出 JSON 陣列。'}]}],
@@ -797,9 +810,15 @@ async function llmVision(dataUrl){
   if(!txt)throw new Error('沒讀到內容');
   return JSON.parse(txt);
 }
+function catOptions(sel){ // 下拉選單:未分類 + 支出/收入分組
+  return '<option value="">未分類</option>'+CAT_GROUPS_ALL.map(gr=>
+    `<optgroup label="${esc(gr.g)}">`+gr.items.map(([k])=>
+      `<option value="${esc(k)}"${k===sel?' selected':''}>${esc(k)}</option>`).join('')+'</optgroup>'
+  ).join('');
+}
 function updateBillInfo(){
   const c=billRows.filter(b=>b.checked);
-  const e=c.filter(b=>b.kind!=='income'),i=c.filter(b=>b.kind==='income');
+  const e=c.filter(b=>!INCOME_SET.has(b.category)),i=c.filter(b=>INCOME_SET.has(b.category));
   $('billInfo').textContent=`支出 ${e.length} 筆(${money(e.reduce((s,b)=>s+b.amount,0))}) · 收入 ${i.length} 筆(${money(i.reduce((s,b)=>s+b.amount,0))})`;
   $('billImport').textContent=`匯入 ${c.length} 筆`;
 }
@@ -807,49 +826,44 @@ function renderBill(){
   const list=$('billList');
   if(!billRows.length){list.innerHTML='<div class="empty">沒有讀到交易。<br>換一張更清楚的截圖試試。</div>';$('billInfo').textContent='';$('billImport').textContent='匯入';return}
   list.innerHTML=billRows.map((b,i)=>{
-    const tag=b.kind==='income'?'→ 拍賣收入':(b.category||'');
+    const inc=INCOME_SET.has(b.category);
     return `
-    <label class="bill-row ${b.checked?'':'off'}" data-i="${i}">
-      <input type="checkbox" class="bill-ck" ${b.checked?'checked':''}>
+    <div class="bill-row ${b.checked?'':'off'}" data-i="${i}">
+      <input type="checkbox" class="bill-ck" ${b.checked?'checked':''} aria-label="勾選">
       <span class="bill-d num">${b.ts?md(b.ts):'—'}</span>
-      <span class="bill-desc">${esc(b.desc)}${tag?` <span class="bill-cat">${esc(tag)}</span>`:''}</span>
-      <span class="bill-amt num" style="${b.kind==='income'?'color:var(--good)':''}">${b.kind==='income'?'+':''}${money(b.amount)}</span>
-    </label>`;}).join('');
+      <span class="bill-desc">${esc(b.desc)}</span>
+      <select class="bill-cat-sel">${catOptions(b.category)}</select>
+      <span class="bill-amt num" style="${inc?'color:var(--good)':''}">${inc?'+':''}${money(b.amount)}</span>
+    </div>`;}).join('');
   updateBillInfo();
 }
 $('billList').addEventListener('change',e=>{
   const row=e.target.closest('.bill-row');if(!row)return;
-  const i=+row.dataset.i;billRows[i].checked=e.target.checked;
-  row.classList.toggle('off',!billRows[i].checked);updateBillInfo();
+  const i=+row.dataset.i;
+  if(e.target.classList.contains('bill-ck')){
+    billRows[i].checked=e.target.checked;
+    row.classList.toggle('off',!billRows[i].checked);
+    updateBillInfo();
+  }else if(e.target.classList.contains('bill-cat-sel')){
+    billRows[i].category=e.target.value||null; // 改分類 → 收入/支出跟著分類走
+    renderBill();
+  }
 });
 $('billAll').onclick=()=>{const any=billRows.some(b=>!b.checked);billRows.forEach(b=>b.checked=any);renderBill()};
 $('billClose').onclick=()=>$('bill').classList.remove('on');
 $('billImport').onclick=async()=>{
   const sel=billRows.filter(b=>b.checked&&b.ts&&isFinite(b.amount)&&b.amount>0);
   if(!sel.length){toast('沒有勾選任何筆');return}
-  let exp=0;const monthInc={}; // 收入累加到各月拍賣收入
+  let exp=0,inc=0;
   for(const b of sel){
-    if(b.kind==='income'){
-      const ym=ymKey(b.ts);monthInc[ym]=(monthInc[ym]||0)+b.amount;
-    }else{
-      await put({id:crypto.randomUUID(),ts:b.ts,amount:b.amount,merchant:b.desc||'—',
-        category:(b.category&&b.category!=='未分類'&&CAT_COLOR[b.category])?b.category:null,
-        raw_text:b.desc||'',source:'statement',updated:Date.now()});exp++;
-    }
-  }
-  let inc=0;
-  const yms=Object.keys(monthInc);
-  if(yms.length){
-    await loadMonths();
-    for(const ym of yms){
-      const cur=monthMap[ym]||{auction:0,note:''};
-      cur.auction=(cur.auction||0)+monthInc[ym];monthMap[ym]=cur;
-      await putMonth({ym,auction:cur.auction,note:cur.note||'',updated:Date.now()});inc++;
-    }
+    const cat=(b.category&&CAT_COLOR[b.category])?b.category:null;
+    await put({id:crypto.randomUUID(),ts:b.ts,amount:b.amount,merchant:b.desc||'—',
+      category:cat,raw_text:b.desc||'',source:'statement',updated:Date.now()});
+    if(INCOME_SET.has(cat))inc++;else exp++;
   }
   $('bill').classList.remove('on');
   await render();scheduleSync();
-  toast(`已匯入 ${exp} 筆支出`+(inc?` · 收入計入 ${inc} 個月的拍賣收入`:''));
+  toast(`已匯入 支出 ${exp} 筆 · 收入 ${inc} 筆`);
 };
 $('billFile').onchange=async e=>{
   const files=[...e.target.files];e.target.value='';
@@ -862,8 +876,11 @@ $('billFile').onchange=async e=>{
       const rows=await llmVision(await fileToDataURL(f));
       for(const r of rows){
         const ts=parseStmtDate(r.date),amt=Math.abs(Number(r.amount)),desc=(r.desc||'').trim();
-        const kind=r.kind==='income'?'income':'expense';
-        billRows.push({ts,desc,amount:amt,kind,category:r.category||null,
+        // 決定分類:收入→收入類(預設拍賣收入);支出→支出類;不合法就 未分類
+        let cat=r.category;
+        if(r.kind==='income') cat=INCOME_SET.has(cat)?cat:AUC_CAT;
+        else cat=(cat&&EXP_NAMES.includes(cat))?cat:null;
+        billRows.push({ts,desc,amount:amt,category:cat,
           checked:!!ts&&isFinite(amt)&&amt>0&&!JUNK.test(desc)}); // 預設勾選:有日期、金額>0、非轉帳/手續費等
       }
     }
