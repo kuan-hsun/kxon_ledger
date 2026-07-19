@@ -205,6 +205,12 @@
   .bill-ck{width:20px;height:20px;flex:none;accent-color:var(--accent)}
   .bill-d{font-size:12px;color:var(--dim);flex:none;width:44px}
   .bill-desc{flex:1;min-width:40px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dupflag{
+    margin-left:6px;padding:1px 5px;border-radius:4px;
+    font-size:10px;vertical-align:1px;
+    background:#2a333b;color:var(--dim);
+  }
+  .dupflag.warn{color:var(--warn)}
   .bill-cat-sel{flex:none;max-width:104px;background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 6px;font:inherit;font-size:12px;outline:none}
   .bill-cat-sel:focus{border-color:var(--accent)}
   .bill-amt{flex:none;letter-spacing:-.01em}
@@ -901,6 +907,26 @@ async function llmVision(dataUrl){
   if(!txt)throw new Error('沒讀到內容');
   return JSON.parse(txt);
 }
+/* 去重:掃到的每筆跟現有紀錄比對。兩級判定,刻意不靜默丟掉任何東西——
+   看不見的自動略過,比重複更難debug。
+     exact = 同日 + 同金額 + 同商家 → 幾乎確定是同一張帳單掃第二次,取消勾選
+     loose = 同日 + 同金額(商家不同)→ 可能是你當初手打過同一筆,只標記提醒 */
+const dupKey=(ts,amt,desc)=>dayKey(ts)+'|'+amt+'|'+String(desc||'').trim();
+const looseKey=(ts,amt)=>dayKey(ts)+'|'+amt;
+async function markDupes(){
+  const have=(await all()).filter(r=>!r.deleted);
+  const exact=new Set(have.map(r=>dupKey(r.ts,r.amount,r.merchant)));
+  const loose=new Set(have.map(r=>looseKey(r.ts,r.amount)));
+  const seen=new Set();                      // 同一批裡自己重複的也要抓
+  for(const b of billRows){
+    if(!b.ts||!isFinite(b.amount)){b.dup='';continue}
+    const k=dupKey(b.ts,b.amount,b.desc);
+    if(exact.has(k)||seen.has(k)){b.dup='exact';b.checked=false}
+    else if(loose.has(looseKey(b.ts,b.amount)))b.dup='loose';
+    else b.dup='';
+    seen.add(k);
+  }
+}
 function catOptions(sel){ // 下拉選單:未分類 + 支出/收入分組
   return '<option value="">未分類</option>'+CAT_GROUPS_ALL.map(gr=>
     `<optgroup label="${esc(gr.g)}">`+gr.items.map(([k])=>
@@ -910,7 +936,9 @@ function catOptions(sel){ // 下拉選單:未分類 + 支出/收入分組
 function updateBillInfo(){
   const c=billRows.filter(b=>b.checked);
   const e=c.filter(b=>!INCOME_SET.has(b.category)),i=c.filter(b=>INCOME_SET.has(b.category));
-  $('billInfo').textContent=`支出 ${e.length} 筆(${money(e.reduce((s,b)=>s+b.amount,0))}) · 收入 ${i.length} 筆(${money(i.reduce((s,b)=>s+b.amount,0))})`;
+  const dEx=billRows.filter(b=>b.dup==='exact').length, dLo=billRows.filter(b=>b.dup==='loose').length;
+  const dup=dEx||dLo ? ` · 重複 ${dEx} 已取消勾選${dLo?`,疑似 ${dLo} 筆請自己確認`:''}` : '';
+  $('billInfo').textContent=`支出 ${e.length} 筆(${money(e.reduce((s,b)=>s+b.amount,0))}) · 收入 ${i.length} 筆(${money(i.reduce((s,b)=>s+b.amount,0))})`+dup;
   $('billImport').textContent=`匯入 ${c.length} 筆`;
 }
 function renderBill(){
@@ -922,7 +950,7 @@ function renderBill(){
     <div class="bill-row ${b.checked?'':'off'}" data-i="${i}">
       <input type="checkbox" class="bill-ck" ${b.checked?'checked':''} aria-label="勾選">
       <span class="bill-d num">${b.ts?md(b.ts):'—'}</span>
-      <span class="bill-desc">${esc(b.desc)}</span>
+      <span class="bill-desc">${esc(b.desc)}${b.dup==='exact'?'<span class="dupflag">已有</span>':b.dup==='loose'?'<span class="dupflag warn">疑似</span>':''}</span>
       <select class="bill-cat-sel">${catOptions(b.category)}</select>
       <span class="bill-amt num" style="${inc?'color:var(--good)':''}">${inc?'+':''}${money(b.amount)}</span>
     </div>`;}).join('');
@@ -975,6 +1003,7 @@ $('billFile').onchange=async e=>{
           checked:!!ts&&isFinite(amt)&&amt>0&&!JUNK.test(desc)}); // 預設勾選:有日期、金額>0、非轉帳/手續費等
       }
     }
+    await markDupes();
     renderBill();
   }catch(err){
     $('billList').innerHTML='<div class="empty">辨識失敗:<br>'+esc(String(err.message||err))+'</div>';
