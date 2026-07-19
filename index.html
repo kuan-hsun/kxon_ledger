@@ -963,8 +963,9 @@ async function cloudSync(interactive){
     for(const r of mTx)await put(r);
     for(const m of mMonth)await putMonth(m);
     await sbSave({v:3,exported:new Date().toISOString(),tx:mTx,monthly:mMonth});
+    localStorage.setItem('sb_last',Date.now());
     await render();syncMark();
-    if(interactive)toast('已同步');
+    if(interactive)toast('已同步 '+mTx.length+' 筆');
   }catch(e){
     syncErr(e.message||(''+e));            // 背景失敗也讓按鈕顯示,方便看出原因
     if(interactive)toast('同步失敗:'+(e.message||e));
@@ -975,10 +976,28 @@ function scheduleSync(){
   if(!sbOn())return;
   clearTimeout(syncTimer);syncTimer=setTimeout(()=>cloudSync(false),2500);
 }
-function syncMark(){syncErrMsg='';const b=$('sync');b.textContent='同步 ✓';b.style.color='var(--accent)';b.style.borderColor='var(--accent)'}
+/* 按鈕要能一眼看出「真的同步過了」而不只是「有設定」,所以顯示上次同步
+   時間;從沒成功過就顯示「同步 ?」,不要用 ✓ 騙自己。                  */
+const lastSync=()=>+localStorage.getItem('sb_last')||0;
+function agoLabel(t){
+  if(!t)return '';
+  const s=Math.round((Date.now()-t)/1000);
+  if(s<90)return '剛剛';
+  if(s<3600)return Math.round(s/60)+'分前';
+  if(s<86400)return Math.round(s/3600)+'時前';
+  return Math.round(s/86400)+'天前';
+}
+function syncMark(){syncErrMsg='';reflectSync()}
 function syncErr(msg){syncErrMsg=msg;const b=$('sync');b.textContent='同步 !';b.style.color='var(--warn)';b.style.borderColor='var(--warn)'}
-function reflectSync(){const on=sbOn();const b=$('sync');
-  b.textContent=on?'同步 ✓':'同步';b.style.color=on?'var(--good)':'';b.style.borderColor=on?'var(--good)':''}
+function reflectSync(){
+  const b=$('sync');
+  if(!sbOn()){b.textContent='同步';b.style.color='';b.style.borderColor='';return}
+  const t=lastSync();
+  b.textContent=t?'同步 '+agoLabel(t):'同步 ?';
+  b.style.color=t?'var(--good)':'var(--warn)';
+  b.style.borderColor=t?'var(--good)':'var(--warn)';
+}
+setInterval(()=>{if(sbOn()&&!syncErrMsg)reflectSync()},60000); // 讓「幾分前」會自己走
 
 const SETUP_SQL=`create table if not exists ledger (
   key text primary key,
@@ -994,9 +1013,19 @@ async function setupSync(){
   if(u===null)return;
   const k=prompt('2/3 anon public key\n(Settings → API → Project API keys → anon public)',sbKey());
   if(k===null)return;
-  const c=prompt('3/3 同步碼\n自己取一組不好猜的字串,手機和電腦輸入同一組就會同步。',sbCode()||'kxon-'+Math.random().toString(36).slice(2,10));
+  /* 同步碼不預填隨機值:第二台裝置若直接按 OK 接受預填,會產生另一組碼、
+     各寫各的列,而且完全不會報錯。一定要逼使用者自己決定。            */
+  let c;
+  if(sbCode()){
+    c=prompt('3/3 同步碼(這台目前是 '+sbCode()+')',sbCode());
+  }else if(confirm('3/3 同步碼\n\n這台是「第一台」裝置嗎?\n\n確定 = 第一台,幫我產生新的同步碼\n取消 = 我要接上已經在用的裝置,我自己輸入')){
+    const gen='kxon-'+Math.random().toString(36).slice(2,10);
+    c=prompt('這是你的同步碼,請記下來(存進密碼管理器最保險)。\n另一台裝置要輸入「一模一樣」的這組碼才會同步:',gen);
+  }else{
+    c=prompt('請輸入另一台裝置上顯示的同步碼(在那台按「同步」就看得到),\n必須一字不差:','');
+  }
   if(c===null)return;
-  if(!u.trim()||!k.trim()||!c.trim()){toast('三項都要填');return}
+  if(!u.trim()||!k.trim()||!(c||'').trim()){toast('三項都要填');return}
   localStorage.setItem('sb_url',u.trim());
   localStorage.setItem('sb_key',k.trim());
   localStorage.setItem('sb_code',c.trim());
@@ -1006,7 +1035,8 @@ async function setupSync(){
 $('sync').onclick=async()=>{
   if(sbOn()){
     const base=syncErrMsg?('⚠ 上次同步失敗:\n'+syncErrMsg+'\n\n'):'';
-    const a=prompt(base+'同步碼:'+sbCode()+'\n\n直接按 OK = 立即同步\n輸入 setup = 重設連線\n輸入 sql = 顯示建表 SQL\n輸入 off = 解除連線','');
+    const last=lastSync()?('上次同步:'+agoLabel(lastSync())+'\n'):'⚠ 這台從來沒有同步成功過\n';
+    const a=prompt(base+last+'同步碼:'+sbCode()+'\n(另一台要輸入一模一樣的這組碼)\n\n直接按 OK = 立即同步\n輸入 setup = 重設連線\n輸入 sql = 顯示建表 SQL\n輸入 off = 解除連線','');
     if(a===null)return;
     const cmd=a.trim().toLowerCase();
     if(cmd==='off'){
