@@ -12,7 +12,6 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="記帳">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<script src="https://accounts.google.com/gsi/client" async></script>
 <style>
   :root{
     --bg:#101418;
@@ -252,7 +251,7 @@
 <footer>
   <button class="btn" id="statsBtn">統計</button>
   <button class="btn" id="ai">AI</button>
-  <button class="btn" id="drive">Drive</button>
+  <button class="btn" id="sync">同步</button>
   <button class="btn" id="export">匯出</button>
   <button class="btn" id="import">匯入</button>
   <div class="spacer"></div>
@@ -909,135 +908,43 @@ $('ai').onclick=()=>{
   reflectAI();
 };
 
-/* ══ Google Drive 同步 ════════════════════════════════════
-   純前端:用 Google Identity Services 拿 access token(drive.file
-   權限,只碰 App 自己建的 ledger.json)。合併規則:同 id 比 updated,
-   新的蓋舊的;刪除是軟刪除 tombstone,所以多裝置不會又跑回來。      */
-let driveToken='',tokenExp=0,syncing=false,syncTimer=null,driveAuthErr='';
-const driveClientId=()=>localStorage.getItem('drive_client_id')||'';
-const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
-const TOKEN_KEY='drive_token',TOKEN_EXP='drive_token_exp';
-const redirectUri=()=>(location.origin+location.pathname).replace(/index\.html$/,'');
+/* ══ Supabase 同步 ════════════════════════════════════════
+   換掉原本的 Google Drive:Drive 用 OAuth implicit flow,token 只有
+   1 小時又拿不到 refresh token(純前端沒後端),手機還會擋靜默續期
+   的 iframe,所以幾乎每次開都要重新授權。
+   Supabase 用 anon key + 自訂「同步碼」當 row id:key 不會過期、
+   完全不用登入。合併規則照舊:同 id 比 updated,新的蓋舊的;刪除是
+   軟刪除 tombstone,多裝置不會又跑回來。                          */
+let syncing=false,syncTimer=null,syncErrMsg='';
+const sbUrl =()=>(localStorage.getItem('sb_url')||'').replace(/\/+$/,'');
+const sbKey =()=>localStorage.getItem('sb_key')||'';
+const sbCode=()=>localStorage.getItem('sb_code')||'';
+const sbOn  =()=>!!(sbUrl()&&sbKey()&&sbCode());
+const SB_TABLE='ledger';
 
-/* 用「整頁跳轉」的 OAuth implicit flow,不靠 popup(手機/主畫面 App 都能授權)。
-   授權後 Google 會把 token 放在網址 #hash 導回,開機時解析並存起來。         */
-function storedToken(){
-  const t=localStorage.getItem(TOKEN_KEY),e=+localStorage.getItem(TOKEN_EXP)||0;
-  return (t&&Date.now()<e-60000)?t:'';
-}
-function beginAuth(silent){
-  const p=new URLSearchParams({client_id:driveClientId(),redirect_uri:redirectUri(),
-    response_type:'token',scope:DRIVE_SCOPE,include_granted_scopes:'true',
-    state:'ledger',prompt:silent?'none':'consent'});
-  location.href='https://accounts.google.com/o/oauth2/v2/auth?'+p.toString();
-}
-function consumeAuthHash(){
-  const hash=location.hash||'';
-  if(hash.indexOf('access_token=')>=0){
-    const h=new URLSearchParams(hash.slice(1));
-    const t=h.get('access_token'),exp=+(h.get('expires_in')||3600);
-    if(t){localStorage.setItem(TOKEN_KEY,t);localStorage.setItem(TOKEN_EXP,Date.now()+exp*1000);driveToken=t;tokenExp=Date.now()+exp*1000}
-    sessionStorage.removeItem('drive_silent_tried');
-    history.replaceState(null,'',redirectUri()); // 把 token 從網址清掉
-    return !!t;
-  }
-  if(hash.indexOf('error=')>=0){
-    const h=new URLSearchParams(hash.slice(1));
-    driveAuthErr='Google 授權被拒:'+(h.get('error')||'');
-    history.replaceState(null,'',redirectUri());
-  }
-  return false;
-}
-/* GIS token client:電腦上能用「隱藏 iframe」靜默續期(不跳轉),
-   首次授權用彈窗;彈窗被擋(手機)時自動退回整頁跳轉。          */
-let tokenClient=null,_tres=null,_trej=null;
-function gisReady(){return !!(window.google&&google.accounts&&google.accounts.oauth2)}
-function initTokenClient(){
-  if(tokenClient||!driveClientId()||!gisReady())return tokenClient;
-  tokenClient=google.accounts.oauth2.initTokenClient({
-    client_id:driveClientId(),scope:DRIVE_SCOPE,
-    callback:resp=>{
-      if(resp&&resp.access_token){
-        driveToken=resp.access_token;tokenExp=Date.now()+((resp.expires_in||3000)*1000);
-        localStorage.setItem(TOKEN_KEY,driveToken);localStorage.setItem(TOKEN_EXP,tokenExp);
-        const f=_tres;_tres=_trej=null;f&&f(driveToken);
-      }else{const f=_trej;_tres=_trej=null;f&&f(new Error((resp&&resp.error)||'授權失敗'))}
-    },
-    error_callback:err=>{const f=_trej;_tres=_trej=null;f&&f(new Error((err&&(err.type||err.message))||'popup_failed'))}
-  });
-  return tokenClient;
-}
-function gisToken(interactive){
-  return new Promise((res,rej)=>{
-    const tc=initTokenClient();
-    if(!tc){rej(new Error('gis-not-ready'));return}
-    _tres=res;_trej=rej;
-    try{tc.requestAccessToken({prompt:interactive?'consent':''})}catch(e){rej(e)}
-  });
-}
-async function ensureToken(interactive){
-  const s=storedToken();
-  if(s){driveToken=s;return s}
-  if(gisReady()){
-    try{return await gisToken(false)}   // 靜默續期(iframe,無畫面)
-    catch(e){ if(!interactive) throw new Error('尚未授權'); }
-    try{return await gisToken(true)}     // 首次/需互動 → 彈窗(電腦可用)
-    catch(e){ /* 彈窗被擋(手機) → 落到整頁跳轉 */ }
-  }
-  if(interactive){beginAuth(false);throw new Error('轉到 Google 授權中…')} // 頁面即將跳走
-  throw new Error('尚未授權');
-}
-async function driveFetch(url,opts){
-  opts=opts||{};
-  let t=await ensureToken(false);
-  const go=tok=>fetch(url,{...opts,headers:{...(opts.headers||{}),Authorization:'Bearer '+tok}});
-  let r=await go(t);
-  if(r.status===401){ // token 失效 → 清掉,靜默換新再試一次
-    localStorage.removeItem(TOKEN_KEY);localStorage.removeItem(TOKEN_EXP);driveToken='';
-    try{t=await ensureToken(false)}catch(e){throw new Error('授權過期,請按 Drive 重新連結');}
-    r=await go(t);
-  }
-  return r;
+function sbHeaders(extra){
+  return {apikey:sbKey(),Authorization:'Bearer '+sbKey(),
+          'Content-Type':'application/json',...(extra||{})};
 }
 async function apiErr(r,what){
   let t='';try{t=(await r.text()).slice(0,160)}catch{}
+  if(r.status===404)return new Error(what+' 404:找不到 '+SB_TABLE+' 資料表,請先在 Supabase 執行建表 SQL');
+  if(r.status===401||r.status===403)return new Error(what+' '+r.status+':anon key 或 RLS 政策不對 '+t);
   return new Error(what+' '+r.status+' '+t);
 }
-async function findFile(){
-  const cached=localStorage.getItem('drive_file_id');
-  if(cached)return cached;
-  const q=encodeURIComponent("name='ledger.json' and trashed=false");
-  const r=await driveFetch('https://www.googleapis.com/drive/v3/files?q='+q+'&spaces=drive&fields=files(id,modifiedTime)&orderBy=modifiedTime desc');
-  if(!r.ok)throw await apiErr(r,'查詢失敗');
-  const j=await r.json();const f=j.files&&j.files[0];
-  if(f){localStorage.setItem('drive_file_id',f.id);return f.id}
-  return null;
-}
-async function downloadRemote(id){
-  const r=await driveFetch('https://www.googleapis.com/drive/v3/files/'+id+'?alt=media');
-  if(r.status===404){localStorage.removeItem('drive_file_id');return null}
-  if(!r.ok)throw await apiErr(r,'下載失敗');
-  try{return await r.json()}catch{return null}
-}
-async function uploadRemote(id,payload){
-  const body=JSON.stringify(payload);
-  if(id){
-    const r=await driveFetch('https://www.googleapis.com/upload/drive/v3/files/'+id+'?uploadType=media',
-      {method:'PATCH',headers:{'Content-Type':'application/json'},body});
-    if(!r.ok)throw await apiErr(r,'更新失敗');
-    return id;
-  }
-  const b='b'+Math.random().toString(36).slice(2);
-  const meta={name:'ledger.json',mimeType:'application/json'};
-  const multipart='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)
-    +'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+body+'\r\n--'+b+'--';
-  const r=await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
-    {method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body:multipart});
-  if(!r.ok)throw await apiErr(r,'建立失敗');
+async function sbLoad(){
+  const u=sbUrl()+'/rest/v1/'+SB_TABLE+'?select=data&key=eq.'+encodeURIComponent(sbCode());
+  const r=await fetch(u,{headers:sbHeaders()});
+  if(!r.ok)throw await apiErr(r,'讀取失敗');
   const j=await r.json();
-  if(!j.id)throw new Error('建立失敗:回應沒有檔案 id');
-  localStorage.setItem('drive_file_id',j.id);
-  return j.id;
+  return (j&&j[0]&&j[0].data)||null;
+}
+async function sbSave(payload){
+  const u=sbUrl()+'/rest/v1/'+SB_TABLE+'?on_conflict=key';
+  const r=await fetch(u,{method:'POST',
+    headers:sbHeaders({Prefer:'resolution=merge-duplicates,return=minimal'}),
+    body:JSON.stringify({key:sbCode(),data:payload,updated:new Date().toISOString()})});
+  if(!r.ok)throw await apiErr(r,'寫入失敗');
 }
 function mergeById(a,b,key){
   const m=new Map();
@@ -1045,67 +952,82 @@ function mergeById(a,b,key){
   for(const x of b){const e=m.get(x[key]);if(!e||(x.updated||0)>(e.updated||0))m.set(x[key],x)}
   return [...m.values()];
 }
-async function driveSync(interactive){
-  if(!driveClientId()||syncing)return;
+async function cloudSync(interactive){
+  if(!sbOn()||syncing)return;
   syncing=true;
   try{
-    await ensureToken(interactive);
-    let fid=await findFile();
-    const remote=fid?await downloadRemote(fid):null;
-    if(fid&&!localStorage.getItem('drive_file_id'))fid=null; // 遠端檔被刪 → 重建
+    const remote=await sbLoad();
     const rTx=(remote&&remote.tx)||[],rMonth=(remote&&remote.monthly)||[];
     const mTx=mergeById(await all(),rTx,'id');
     const mMonth=mergeById(await allMonths(),rMonth,'ym');
     for(const r of mTx)await put(r);
     for(const m of mMonth)await putMonth(m);
-    await uploadRemote(fid,{v:3,exported:new Date().toISOString(),tx:mTx,monthly:mMonth});
-    await render();driveMark();
-    if(interactive)toast('已同步 Drive');
+    await sbSave({v:3,exported:new Date().toISOString(),tx:mTx,monthly:mMonth});
+    await render();syncMark();
+    if(interactive)toast('已同步');
   }catch(e){
-    driveErr(e.message||(''+e));           // 背景失敗也讓按鈕顯示,方便看出原因
+    syncErr(e.message||(''+e));            // 背景失敗也讓按鈕顯示,方便看出原因
     if(interactive)toast('同步失敗:'+(e.message||e));
   }
   finally{syncing=false}
 }
 function scheduleSync(){
-  if(!driveClientId())return;
-  clearTimeout(syncTimer);syncTimer=setTimeout(()=>driveSync(false),2500);
+  if(!sbOn())return;
+  clearTimeout(syncTimer);syncTimer=setTimeout(()=>cloudSync(false),2500);
 }
-let driveErrMsg='';
-function driveMark(){driveErrMsg='';const b=$('drive');b.textContent='Drive ✓';b.style.color='var(--accent)';b.style.borderColor='var(--accent)'}
-function driveErr(msg){driveErrMsg=msg;const b=$('drive');b.textContent='Drive !';b.style.color='var(--warn)';b.style.borderColor='var(--warn)'}
-function reflectDrive(){const on=!!driveClientId();const b=$('drive');
-  b.textContent=on?'Drive ✓':'Drive';b.style.color=on?'var(--good)':'';b.style.borderColor=on?'var(--good)':''}
-$('drive').onclick=async()=>{
-  if(driveClientId()){
-    const base=driveErrMsg?('⚠ 上次同步失敗:\n'+driveErrMsg+'\n\n'):'';
-    if(!confirm(base+'立即同步 Drive?\n(按「取消」可解除連結)')){
-      ['drive_client_id','drive_file_id',TOKEN_KEY,TOKEN_EXP].forEach(k=>localStorage.removeItem(k));
-      driveToken='';reflectDrive();toast('已解除 Drive');return;
+function syncMark(){syncErrMsg='';const b=$('sync');b.textContent='同步 ✓';b.style.color='var(--accent)';b.style.borderColor='var(--accent)'}
+function syncErr(msg){syncErrMsg=msg;const b=$('sync');b.textContent='同步 !';b.style.color='var(--warn)';b.style.borderColor='var(--warn)'}
+function reflectSync(){const on=sbOn();const b=$('sync');
+  b.textContent=on?'同步 ✓':'同步';b.style.color=on?'var(--good)':'';b.style.borderColor=on?'var(--good)':''}
+
+const SETUP_SQL=`create table if not exists ledger (
+  key text primary key,
+  data jsonb,
+  updated timestamptz default now()
+);
+alter table ledger enable row level security;
+create policy "anon rw" on ledger for all
+  to anon using (true) with check (true);`;
+
+async function setupSync(){
+  const u=prompt('1/3 Supabase Project URL\n(Settings → API → Project URL,長得像 https://xxxx.supabase.co)',sbUrl());
+  if(u===null)return;
+  const k=prompt('2/3 anon public key\n(Settings → API → Project API keys → anon public)',sbKey());
+  if(k===null)return;
+  const c=prompt('3/3 同步碼\n自己取一組不好猜的字串,手機和電腦輸入同一組就會同步。',sbCode()||'kxon-'+Math.random().toString(36).slice(2,10));
+  if(c===null)return;
+  if(!u.trim()||!k.trim()||!c.trim()){toast('三項都要填');return}
+  localStorage.setItem('sb_url',u.trim());
+  localStorage.setItem('sb_key',k.trim());
+  localStorage.setItem('sb_code',c.trim());
+  reflectSync();
+  toast('連線中…');await cloudSync(true);
+}
+$('sync').onclick=async()=>{
+  if(sbOn()){
+    const base=syncErrMsg?('⚠ 上次同步失敗:\n'+syncErrMsg+'\n\n'):'';
+    const a=prompt(base+'同步碼:'+sbCode()+'\n\n直接按 OK = 立即同步\n輸入 setup = 重設連線\n輸入 sql = 顯示建表 SQL\n輸入 off = 解除連線','');
+    if(a===null)return;
+    const cmd=a.trim().toLowerCase();
+    if(cmd==='off'){
+      ['sb_url','sb_key','sb_code'].forEach(k=>localStorage.removeItem(k));
+      reflectSync();toast('已解除同步');return;
     }
-    toast('同步中…');await driveSync(true); // 電腦:靜默或彈窗續期;手機彈窗被擋才跳轉
+    if(cmd==='sql'){prompt('在 Supabase 的 SQL Editor 執行這段(複製起來):',SETUP_SQL);return}
+    if(cmd==='setup'){await setupSync();return}
+    toast('同步中…');await cloudSync(true);
     return;
   }
-  const v=prompt('貼上 Google OAuth Client ID(結尾是 .apps.googleusercontent.com)。\n電腦會用彈窗授權;手機若被擋會改整頁跳轉。留空取消。','');
-  if(v===null)return;const k=v.trim();if(!k)return;
-  localStorage.setItem('drive_client_id',k);reflectDrive();
-  toast('連線中…');await driveSync(true);
+  await setupSync();
 };
-function bootSync(){
-  if(driveAuthErr)driveErr(driveAuthErr);
-  if(!driveClientId())return;
-  // 等 GIS 載好再同步(電腦可靜默續期,不跳轉);最多等 5 秒,有 stored token 也能先同步
-  let n=0;const t=setInterval(()=>{
-    if(gisReady()||++n>25){clearInterval(t);driveSync(false)}
-  },200);
-}
+function bootSync(){if(sbOn())cloudSync(false)}
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden)return;
-  if(driveClientId())driveSync(false);
+  cloudSync(false);
   if(swReg)swReg.update();
 });
-// 兩邊都開著時,每 45 秒自動拉一次 Drive(資料很小,幾乎無感)
-setInterval(()=>{if(!document.hidden&&driveClientId())driveSync(false)},45000);
+// 兩邊都開著時,每 45 秒自動拉一次(資料很小,幾乎無感)
+setInterval(()=>{if(!document.hidden)cloudSync(false)},45000);
 
 /* ══ export / import ══════════════════════════════════════ */
 $('export').onclick=async()=>{
@@ -1147,10 +1069,9 @@ $('file').onchange=async e=>{
 };
 
 /* ══ boot ═════════════════════════════════════════════════ */
-consumeAuthHash();   // 從 Google 授權導回時,先把網址上的 token 收好
 buildChips();
 reflectAI();
-reflectDrive();
+reflectSync();
 open().then(render).then(bootSync).catch(()=>{
   document.body.innerHTML='<div class="empty">這個瀏覽器不給用 IndexedDB。<br>如果開的是無痕視窗,換一般視窗試試。</div>';
 });
