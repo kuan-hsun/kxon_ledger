@@ -70,8 +70,33 @@
   }
   #add:active{opacity:.6}
 
+  /* ── filter bar ─────────────────────── */
+  .filter{
+    display:flex;align-items:center;gap:8px;
+    padding:10px var(--pad);border-bottom:1px solid var(--line);
+  }
+  .filter select{
+    background:var(--field);color:var(--ink);
+    border:1px solid var(--line);border-radius:var(--r);
+    padding:7px 10px;font:inherit;font-size:13px;outline:none;
+    max-width:60%;
+  }
+  .filter select:focus{border-color:var(--accent)}
+  .filter select.on{border-color:var(--accent);color:var(--accent)}
+  .fbtn{padding:7px 12px;font-size:12px}
+
   /* ── list ───────────────────────────── */
   main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .mhead{
+    display:flex;align-items:baseline;gap:8px;cursor:pointer;
+    padding:13px var(--pad);border-bottom:1px solid var(--line);
+    background:var(--field);
+  }
+  .mhead:active{background:#1e262d}
+  .m-arrow{flex:none;color:var(--dim);font-size:11px;width:10px}
+  .m-name{flex:1;font-size:14px;letter-spacing:.02em}
+  .m-n{font-size:11px;color:var(--dim);flex:none}
+  .m-sum{font-size:14px;color:var(--dim);flex:none;letter-spacing:-.01em}
   .daygroup{padding-top:6px}
   .dayhead{
     padding:14px var(--pad) 6px;font-size:11px;letter-spacing:.14em;
@@ -242,6 +267,12 @@
     </svg>
   </button>
   <button id="add" aria-label="新增">+</button>
+</div>
+
+<div class="filter">
+  <select id="fCat" aria-label="分類篩選"></select>
+  <div class="spacer"></div>
+  <button class="btn fbtn" id="fExpand">展開全部</button>
 </div>
 
 <main id="list"></main>
@@ -478,34 +509,82 @@ const dOnly=ts=>{const d=new Date(ts),p=n=>String(n).padStart(2,'0');
 const $=id=>document.getElementById(id);
 let rows=[];
 
+/* 篩選 / 收合狀態。清單按月分段,只有當月預設展開——舊資料放著給你翻,
+   但不要一開 App 就洗掉整個畫面。                                   */
+let catFilter='';
+let openMonths=new Set([ymKey(Date.now())]);
+const monthLabel=k=>{const[Y,M]=k.split('-');return `${Y}年${+M}月`};
+
+function matchCat(r){
+  if(!catFilter)return true;
+  if(catFilter==='__none')return !r.category;
+  if(catFilter==='__inc')return isIncome(r);
+  return r.category===catFilter;
+}
+
+function buildCatFilter(){
+  const sel=$('fCat');
+  const opt=(v,t)=>`<option value="${esc(v)}">${esc(t)}</option>`;
+  sel.innerHTML=opt('','全部分類')+opt('__none','未分類')+opt('__inc','全部收入')
+    +CAT_GROUPS_ALL.map(gr=>`<optgroup label="${esc(gr.g)}">`
+      +gr.items.map(([k])=>opt(k,k)).join('')+'</optgroup>').join('');
+}
+
 async function render(){
   rows=(await all()).filter(r=>!r.deleted).sort((a,b)=>b.ts-a.ts);
   const today=dayKey(Date.now()), w0=weekStart(Date.now());
   const spend=rows.filter(r=>!isIncome(r)); // 花費合計只算支出,不含收入
+  // 上方今天/本週一律看全部,不受篩選影響——那是「我今天花多少」,篩掉就沒意義了
   $('sumToday').textContent=money(spend.filter(r=>dayKey(r.ts)===today).reduce((s,r)=>s+r.amount,0));
   $('sumWeek').textContent =money(spend.filter(r=>r.ts>=w0).reduce((s,r)=>s+r.amount,0));
-  $('count').textContent=rows.length?rows.length+' 筆':'';
+
+  const view=rows.filter(matchCat);
+  $('count').textContent=catFilter
+    ? (view.length+' / '+rows.length+' 筆')
+    : (rows.length?rows.length+' 筆':'');
+  $('fCat').classList.toggle('on',!!catFilter);
 
   const list=$('list');
   if(!rows.length){
     list.innerHTML='<div class="empty">還沒有紀錄。<br>在上面打一句話,或按麥克風說一句就好。</div>';
     return;
   }
-  const groups={};
-  rows.forEach(r=>{(groups[dayKey(r.ts)] ||= []).push(r)});
-  list.innerHTML=Object.entries(groups).map(([k,rs])=>`
-    <div class="daygroup">
-      <div class="dayhead"><span>${dayLabel(k)}</span><span class="num">${money(rs.filter(r=>!isIncome(r)).reduce((s,r)=>s+r.amount,0))}</span></div>
-      ${rs.map(r=>{
-        const col=r.category?CAT_COLOR[r.category]:null, inc=isIncome(r);
-        return `
-        <div class="row" data-id="${r.id}">
-          <span class="r-dot" style="${col?`background:${col}`:''}"></span>
-          <span class="r-name">${esc(r.merchant)}</span>
-          ${r.category?`<span class="r-cat">${esc(r.category)}</span>`:''}
-          <span class="r-amt num" style="${inc?'color:var(--good)':''}">${inc?'+':''}${money(r.amount)}</span>
-        </div>`;}).join('')}
-    </div>`).join('');
+  if(!view.length){
+    list.innerHTML='<div class="empty">這個分類沒有紀錄。</div>';
+    return;
+  }
+  const months={};
+  view.forEach(r=>{(months[ymKey(r.ts)] ||= []).push(r)});
+  const sum=rs=>money(rs.filter(r=>!isIncome(r)).reduce((s,r)=>s+r.amount,0));
+
+  list.innerHTML=Object.entries(months).map(([ym,mrs])=>{
+    const open=openMonths.has(ym);
+    const days={};
+    mrs.forEach(r=>{(days[dayKey(r.ts)] ||= []).push(r)});
+    const body=open?Object.entries(days).map(([k,rs])=>`
+      <div class="daygroup">
+        <div class="dayhead"><span>${dayLabel(k)}</span><span class="num">${sum(rs)}</span></div>
+        ${rs.map(r=>{
+          const col=r.category?CAT_COLOR[r.category]:null, inc=isIncome(r);
+          return `
+          <div class="row" data-id="${r.id}">
+            <span class="r-dot" style="${col?`background:${col}`:''}"></span>
+            <span class="r-name">${esc(r.merchant)}</span>
+            ${r.category?`<span class="r-cat">${esc(r.category)}</span>`:''}
+            <span class="r-amt num" style="${inc?'color:var(--good)':''}">${inc?'+':''}${money(r.amount)}</span>
+          </div>`;}).join('')}
+      </div>`).join(''):'';
+    return `
+      <div class="mhead" data-ym="${ym}">
+        <span class="m-arrow">${open?'▾':'▸'}</span>
+        <span class="m-name">${monthLabel(ym)}</span>
+        <span class="m-n">${mrs.length} 筆</span>
+        <span class="m-sum num">${sum(mrs)}</span>
+      </div>${body}`;
+  }).join('');
+
+  const allOpen=Object.keys(months).every(ym=>openMonths.has(ym));
+  $('fExpand').textContent=allOpen?'只留當月':'展開全部';
 }
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -616,9 +695,24 @@ $('sheetDate').addEventListener('change',async e=>{
 function closeSheet(){$('scrim').classList.remove('on');$('sheet').classList.remove('on');sheetRow=null}
 $('scrim').onclick=closeSheet;
 $('list').addEventListener('click',e=>{
+  const mh=e.target.closest('.mhead');
+  if(mh){const ym=mh.dataset.ym;openMonths.has(ym)?openMonths.delete(ym):openMonths.add(ym);render();return}
   const row=e.target.closest('.row');if(!row)return;
   const r=rows.find(x=>x.id===row.dataset.id);if(r)openSheet(r);
 });
+$('fCat').onchange=e=>{
+  catFilter=e.target.value;
+  // 篩了分類還維持收合的話,常常整頁空白,所以一篩就全開;清掉篩選再收回當月
+  if(catFilter)rows.forEach(r=>openMonths.add(ymKey(r.ts)));
+  else openMonths=new Set([ymKey(Date.now())]);
+  render();
+};
+$('fExpand').onclick=()=>{
+  const shown=new Set(rows.filter(matchCat).map(r=>ymKey(r.ts)));
+  const allOpen=[...shown].every(ym=>openMonths.has(ym));
+  openMonths=allOpen?new Set([ymKey(Date.now())]):shown;
+  render();
+};
 $('chipWrap').addEventListener('click',async e=>{
   const ch=e.target.closest('.chip');if(!ch||!sheetRow)return;
   const cat=ch.dataset.cat;
@@ -1097,6 +1191,7 @@ $('file').onchange=async e=>{
 
 /* ══ boot ═════════════════════════════════════════════════ */
 buildChips();
+buildCatFilter();
 reflectAI();
 reflectSync();
 open().then(render).then(bootSync).catch(()=>{
