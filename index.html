@@ -965,7 +965,7 @@ async function cloudSync(interactive){
     await sbSave({v:3,exported:new Date().toISOString(),tx:mTx,monthly:mMonth});
     localStorage.setItem('sb_last',Date.now());
     await render();syncMark();
-    if(interactive)toast('已同步 '+mTx.length+' 筆');
+    if(interactive)toast('已同步 '+mTx.filter(r=>!r.deleted).length+' 筆'); // 跟右下角「N 筆」一樣不算 tombstone
   }catch(e){
     syncErr(e.message||(''+e));            // 背景失敗也讓按鈕顯示,方便看出原因
     if(interactive)toast('同步失敗:'+(e.message||e));
