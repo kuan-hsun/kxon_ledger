@@ -242,7 +242,52 @@
   }
   table.st input.note{width:150px;text-align:left}
   table.st input:focus{border-color:var(--accent)}
-  .st-foot{padding:12px var(--pad);border-top:1px solid var(--line);font-size:12px;color:var(--dim)}
+  .st-foot{padding:12px var(--pad);border-top:1px solid var(--line);font-size:12px;color:var(--dim);line-height:1.6}
+
+  /* ── coverage ───────────────────────── */
+  .cov{padding:20px var(--pad) 18px;border-bottom:1px solid var(--line)}
+  .cov-top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+  .cov-pct{font-size:44px;font-weight:300;line-height:1;letter-spacing:-.02em;margin-top:4px}
+  .cov-pct.hit{color:var(--good)}
+  .cov-side{text-align:right}
+  .cov-sub{font-size:12px;color:var(--dim);line-height:1.7}
+  .cov-sub b{color:var(--ink);font-weight:500}
+  .bar{height:6px;border-radius:3px;background:var(--field);margin:14px 0 4px;overflow:hidden}
+  .bar-in{height:100%;width:0;border-radius:3px;background:var(--accent);transition:width .3s}
+  .bar-in.hit{background:var(--good)}
+  .cov-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-top:14px}
+  .cov-f{display:flex;align-items:center;justify-content:space-between;gap:8px;
+         font-size:12px;color:var(--dim);min-width:0}
+  .cov-f em{font-style:normal;opacity:.75}
+  .cov-f input{
+    width:96px;flex:none;background:var(--field);color:var(--ink);
+    border:1px solid var(--line);border-radius:7px;padding:6px 8px;
+    font:inherit;font-size:14px;text-align:right;outline:none;
+    font-variant-numeric:tabular-nums;
+  }
+  .cov-f input:focus{border-color:var(--accent)}
+  .cov-total{border-top:1px solid var(--line);padding-top:9px;margin-top:2px;grid-column:1/-1}
+  .cov-total b{font-size:17px;color:var(--ink);font-weight:500}
+  .owe{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
+       padding:16px var(--pad);border-bottom:1px solid var(--line)}
+  .owe-n{font-size:28px;font-weight:300;line-height:1.1;color:var(--warn);letter-spacing:-.01em}
+  .owe-r{font-size:12px;color:var(--dim);text-align:right;line-height:1.7}
+  .owe-r b{color:var(--ink);font-weight:500}
+  .adv-btn{
+    flex:1;min-width:0;background:var(--field);color:var(--warn);
+    border:1px solid var(--line);border-radius:var(--r);
+    padding:11px 12px;font:inherit;font-size:14px;text-align:left;cursor:pointer;
+  }
+  .adv-btn.done{color:var(--good)}
+  .adv-btn:active{background:#1e262d}
+  .owed{
+    flex:none;font-size:10px;padding:1px 5px;border-radius:4px;
+    background:rgba(232,115,90,.18);color:var(--warn);
+  }
+  table.st td.tname{text-align:left}
+  table.st td.tname .cd{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:1px}
+  table.st td.tpct{text-align:left;color:var(--dim);font-size:12px}
+  .chip.auto{border-style:dashed;border-color:var(--dim)}
 
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -313,14 +358,20 @@
     <span class="grp-label" style="margin:0">日期</span>
     <input type="date" id="sheetDate">
   </div>
+  <div class="sheet-date" id="advRow" hidden>
+    <span class="grp-label" style="margin:0">代墊</span>
+    <button class="adv-btn" id="advToggle"></button>
+  </div>
   <div id="chipWrap"></div>
+  <div class="grp-label">能不能砍 <em id="tierAuto"></em></div>
+  <div class="chips" id="tierWrap"></div>
   <button class="sheet-del" id="sheetDel">刪除這筆</button>
 </div>
 
 <!-- stats panel -->
 <div id="stats">
   <div class="st-head">
-    <h2>消費 · 拍賣收入</h2>
+    <h2>統計</h2>
     <div class="yr">
       <button id="yrPrev" aria-label="上一年">‹</button>
       <span id="yrLabel" class="num">2026</span>
@@ -329,6 +380,47 @@
     <button class="btn" id="statsClose">關閉</button>
   </div>
   <div class="st-scroll">
+    <!-- 覆蓋率:這個 app 存在的理由 -->
+    <div class="cov">
+      <div class="cov-top">
+        <div>
+          <div class="t-label">事業覆蓋率</div>
+          <div class="cov-pct num" id="covPct">—</div>
+        </div>
+        <div class="cov-side">
+          <div class="cov-sub num" id="covSub"></div>
+          <div class="cov-sub" id="covStreak"></div>
+        </div>
+      </div>
+      <div class="bar"><div class="bar-in" id="covBar"></div></div>
+      <div class="cov-grid">
+        <label class="cov-f"><span>必要 / 月</span>
+          <input type="number" inputmode="numeric" id="bNeed" placeholder="0"></label>
+        <label class="cov-f"><span>家人 / 月</span>
+          <input type="number" inputmode="numeric" id="bFam" placeholder="0"></label>
+        <label class="cov-f"><span>小孩 / 月 <em id="kidAuto"></em></span>
+          <input type="number" inputmode="numeric" id="bKid" placeholder="自動"></label>
+        <div class="cov-f cov-total"><span>必要底線</span><b class="num" id="baseTotal">—</b></div>
+      </div>
+    </div>
+
+    <!-- 已墊未收:墊出去的錢不會自己回來,要看得見 -->
+    <div class="owe" id="oweBox" hidden>
+      <div>
+        <div class="t-label">已墊未收</div>
+        <div class="owe-n num" id="oweAmt">0</div>
+      </div>
+      <div class="owe-r" id="oweInfo"></div>
+    </div>
+
+    <!-- 實際 tier 分布:拿來跟上面填的底線對照 -->
+    <div class="grp-label" style="padding:0 var(--pad)">實際月均 · <span id="tierBasis"></span></div>
+    <table class="st">
+      <thead><tr><th style="text-align:left">層級</th><th>月均</th><th>年度合計</th><th style="text-align:left">佔比</th></tr></thead>
+      <tbody id="tierBody"></tbody>
+    </table>
+
+    <div class="grp-label" style="padding:16px var(--pad) 0">消費 · 拍賣收入</div>
     <table class="st">
       <thead>
         <tr><th style="text-align:left">月份</th><th>消費</th><th>拍賣收入</th><th>平衡</th><th style="text-align:left">備註</th></tr>
@@ -336,7 +428,7 @@
       <tbody id="stBody"></tbody>
     </table>
   </div>
-  <div class="st-foot">消費 = 分類「娛樂、衣物」的支出；拍賣收入 = 分類「拍賣收入」的收入，皆自動加總。備註手動填。平衡 = 拍賣收入 − 消費。</div>
+  <div class="st-foot">覆蓋率 = 近 3 個完整月的事業收入月均 ÷ 必要底線。事業收入 = 拍賣／外包／其他收入（不含薪資、投資收益）。底線 = 必要 + 家人 + 小孩，三個數字自己填，小孩留空就用記帳自動估。代墊要在該筆的編輯面板按「已收回」才會從已墊未收扣掉。</div>
 </div>
 
 <!-- 帳單截圖匯入 -->
@@ -362,12 +454,13 @@ const C={pink:'#f0bfb8',blue:'#bcd4dc',brown:'#7a4a24',dred:'#9e1b2f',
          yellow:'#efdf9e',plight:'#d6c4ef',pdark:'#4a2a86',green:'#a9dc9a'};
 const CAT_GROUPS=[
   {g:'飲食 · 個人', items:[['外食',C.pink],['保健食品',C.pink],['零食飲料',C.pink],['衣物',C.pink],['鞋子',C.pink],['理髮',C.pink],['書籍',C.pink],['購物',C.pink]]},
-  {g:'居家 · 水電', items:[['日用品',C.blue],['水費',C.blue],['電費',C.blue],['手機費',C.blue],['網路費',C.blue],['天然氣',C.blue],['修繕',C.blue],['房屋基金',C.pdark]]},
-  {g:'交通 · 車', items:[['停車費',C.pink],['油錢',C.pink],['eTag',C.pink],['保養(年)',C.pink],['車險(年)',C.pink],['各類車險',C.pink],['洗車',C.pink],['大眾運輸',C.pink]]},
+  {g:'居家 · 水電', items:[['日用品',C.blue],['水費',C.blue],['電費',C.blue],['手機費',C.blue],['網路費',C.blue],['天然氣',C.blue],['訂閱',C.blue],['修繕',C.blue],['房屋基金',C.pdark]]},
+  {g:'交通 · 車', items:[['停車費',C.pink],['油錢',C.pink],['eTag',C.pink],['保養(年)',C.pink],['車險(年)',C.pink],['各類車險',C.pink],['洗車',C.pink],['大眾運輸',C.pink],['通勤',C.pink]]},
   {g:'小孩', items:[['尿布奶粉',C.pink],['小孩醫療',C.pink],['小孩周邊',C.pink]]},
   {g:'休閒 · 娛樂', items:[['娛樂',C.pink],['串流',C.pink],['旅遊',C.pink],['運動',C.pink],['送禮(年)',C.pink],['上課進修',C.pink]]},
   {g:'保險 · 醫療', items:[['醫療',C.pink],['富邦儲蓄壽險(年)',C.pink],['全球壽險(年)',C.pink],['第一金癌症險',C.pink],['遠雄醫療險(年)',C.pink],['國民年金或健保',C.pink]]},
-  {g:'投資 · 其他', items:[['定期定額',C.yellow],['加碼投資',C.yellow],['創業投入',C.plight],['代墊',C.brown],['預期外支出',C.dred]]},
+  {g:'稅金', items:[['所得稅',C.brown],['牌照稅',C.brown],['燃料稅',C.brown]]},
+  {g:'投資 · 其他', items:[['定期定額',C.yellow],['加碼投資',C.yellow],['自提退休金',C.yellow],['創業投入',C.plight],['代墊',C.brown],['預期外支出',C.dred]]},
 ];
 // 收入分類(綠色)。分類屬於這群 = 這筆算收入(綠色、不計入花費合計)。
 const INCOME_GROUP={g:'收入', items:[['拍賣收入',C.green],['薪資收入',C.green],['外包收入',C.green],['投資收益',C.green],['其他收入',C.green]]};
@@ -380,6 +473,47 @@ const INCOME_SET=new Set(INC_NAMES);
 const isIncome=r=>INCOME_SET.has(r&&r.category);
 const AUC_CAT='拍賣收入';           // 統計表「拍賣收入」的來源分類
 const ENT_CATS=['娛樂','衣物'];      // 統計表「消費」納入的分類(要擴充加在這裡就好)
+
+/* ══ tiers ════════════════════════════════════════════════
+   分類回答「錢花在什麼」,tier 回答「這筆能不能砍」。
+   目標:算出「必要底線」= 事業收入要蓋過的那條線。
+     必要+家人 → 底線(要保留的生活)
+     可砍       → 消減對象
+     因工作     → 離職那天就消失,不該算進底線
+     資產       → 左口袋換右口袋,不是消費,過渡期可暫停
+     創業/代墊  → 根本不是生活開支,獨立看
+   預設值照分類給,單筆可在編輯面板覆寫(r.tier)。            */
+const T_NEED='必要',T_FAM='家人',T_CUT='可砍',T_JOB='因工作',
+      T_ASSET='資產',T_BIZ='創業',T_ADV='代墊';
+const TIERS=[T_NEED,T_FAM,T_CUT,T_JOB,T_ASSET,T_BIZ,T_ADV];
+const TIER_COLOR={[T_NEED]:'#e8735a',[T_FAM]:'#c8f04a',[T_CUT]:'#6f7a80',
+                  [T_JOB]:'#bcd4dc',[T_ASSET]:'#efdf9e',[T_BIZ]:'#d6c4ef',[T_ADV]:'#7a4a24'};
+const CAT_TIER={};
+const setTier=(t,names)=>names.forEach(n=>CAT_TIER[n]=t);
+setTier(T_NEED ,['日用品','水費','電費','手機費','網路費','天然氣','修繕',
+                 '油錢','eTag','停車費','保養(年)','車險(年)','各類車險',
+                 '大眾運輸','牌照稅','燃料稅',
+                 '尿布奶粉','小孩醫療','醫療','國民年金或健保',
+                 '全球壽險(年)','第一金癌症險','遠雄醫療險(年)']);
+setTier(T_FAM  ,['外食','娛樂','串流','旅遊','運動','小孩周邊','送禮(年)']);
+setTier(T_CUT  ,['保健食品','零食飲料','衣物','鞋子','理髮','書籍','購物',
+                 '洗車','上課進修','訂閱','預期外支出']);
+/* 通勤與所得稅是「為了受雇而付的錢」,離職那天一起消失或性質完全改變,
+   所以不能算進「事業要養活我需要多少」的底線裡。                     */
+setTier(T_JOB  ,['通勤','所得稅']);
+setTier(T_ASSET,['定期定額','加碼投資','自提退休金','房屋基金','富邦儲蓄壽險(年)']);
+setTier(T_BIZ  ,['創業投入']);
+setTier(T_ADV  ,['代墊']);
+const tierOf=r=>(r&&(r.tier||CAT_TIER[r.category]))||null;
+
+const BASE_TIERS=[T_NEED,T_FAM];              // 底線由這兩層構成
+const BIZ_INC_CATS=['拍賣收入','外包收入','其他收入']; // 事業收入(不含薪資/投資收益)
+const isBizInc=r=>BIZ_INC_CATS.includes(r&&r.category);
+const KID_CATS=['尿布奶粉','小孩醫療','小孩周邊'];      // 小孩月均的估算來源
+/* 代墊不是開支,是「無息借給別人的錢」。真正要盯的是「已墊未收」餘額,
+   否則墊出去的錢會在流水帳裡失蹤,只有對帳時才發現少了一大筆。      */
+const isAdvance=r=>tierOf(r)===T_ADV;
+const isOwed=r=>isAdvance(r)&&!r.settled&&!isIncome(r);
 
 /* ══ LLM (Gemini) ═════════════════════════════════════════
    給自己用:key 放 localStorage,瀏覽器直接打 Gemini。
@@ -444,7 +578,7 @@ let db;
 
 function open(){
   return new Promise((res,rej)=>{
-    const r=indexedDB.open(DB,2);
+    const r=indexedDB.open(DB,3);
     r.onupgradeneeded=e=>{
       const d=e.target.result;
       if(!d.objectStoreNames.contains('tx')){
@@ -453,6 +587,10 @@ function open(){
       }
       if(!d.objectStoreNames.contains('monthly')){
         d.createObjectStore('monthly',{keyPath:'ym'}); // {ym:'2026-07',auction,note}
+      }
+      // 底線金額是私人資料,絕不寫死在原始碼裡(這個 repo 是公開的),放這裡
+      if(!d.objectStoreNames.contains('meta')){
+        d.createObjectStore('meta',{keyPath:'k'});     // {k:'baseline',need,family,kid}
       }
     };
     r.onsuccess=e=>{db=e.target.result;res()};
@@ -465,6 +603,8 @@ function del(id){return new Promise((res,rej)=>{const r=store('tx','readwrite').
 function all(){return new Promise((res,rej)=>{const r=store('tx','readonly').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
 function putMonth(o){return new Promise((res,rej)=>{const r=store('monthly','readwrite').put(o);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
 function allMonths(){return new Promise((res,rej)=>{const r=store('monthly','readonly').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
+function putMeta(o){return new Promise((res,rej)=>{const r=store('meta','readwrite').put(o);r.onsuccess=res;r.onerror=()=>rej(r.error)})}
+function allMeta(){return new Promise((res,rej)=>{const r=store('meta','readonly').getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)})}
 
 /* ══ parse ════════════════════════════════════════════════
    仍然刻意簡單:抓數字,其餘當商家。分類之後用點選補。
@@ -525,6 +665,7 @@ function matchCat(r){
   if(!catFilter)return true;
   if(catFilter==='__none')return !r.category;
   if(catFilter==='__inc')return isIncome(r);
+  if(catFilter==='__owed')return isOwed(r);
   return r.category===catFilter;
 }
 
@@ -532,6 +673,7 @@ function buildCatFilter(){
   const sel=$('fCat');
   const opt=(v,t)=>`<option value="${esc(v)}">${esc(t)}</option>`;
   sel.innerHTML=opt('','全部分類')+opt('__none','未分類')+opt('__inc','全部收入')
+    +opt('__owed','已墊未收')
     +CAT_GROUPS_ALL.map(gr=>`<optgroup label="${esc(gr.g)}">`
       +gr.items.map(([k])=>opt(k,k)).join('')+'</optgroup>').join('');
 }
@@ -576,6 +718,7 @@ async function render(){
           <div class="row" data-id="${r.id}">
             <span class="r-dot" style="${col?`background:${col}`:''}"></span>
             <span class="r-name">${esc(r.merchant)}</span>
+            ${isOwed(r)?'<span class="owed">未收</span>':''}
             ${r.category?`<span class="r-cat">${esc(r.category)}</span>`:''}
             <span class="r-amt num" style="${inc?'color:var(--good)':''}">${inc?'+':''}${money(r.amount)}</span>
           </div>`;}).join('')}
@@ -655,14 +798,40 @@ function buildChips(){
       `<button class="chip" data-cat="${esc(k)}"><span class="cd" style="background:${c}"></span>${esc(k)}</button>`
     ).join('')}</div>`).join('');
 }
+function buildTierChips(){
+  $('tierWrap').innerHTML=TIERS.map(t=>
+    `<button class="chip" data-tier="${esc(t)}"><span class="cd" style="background:${TIER_COLOR[t]}"></span>${esc(t)}</button>`
+  ).join('');
+}
+/* tier 有兩種來源:分類帶來的預設、跟這筆自己被覆寫過的。
+   只有覆寫過才點亮 chip,不然使用者會以為每筆都手動標過。 */
+function reflectTier(r){
+  const auto=CAT_TIER[r.category]||null;
+  $('tierAuto').textContent=r.tier?'(已覆寫)':(auto?`(分類預設:${auto})`:'(未分類)');
+  $('tierWrap').querySelectorAll('.chip').forEach(ch=>{
+    ch.classList.toggle('sel',ch.dataset.tier===r.tier);
+    ch.classList.toggle('auto',!r.tier&&ch.dataset.tier===auto);
+  });
+  reflectAdv(r);   // tier 改成/改掉代墊,收回按鈕要跟著出現或消失
+}
+/* 只有代墊才需要「收回了沒」,其他筆數顯示這個只會干擾 */
+function reflectAdv(r){
+  const on=isAdvance(r);
+  $('advRow').hidden=!on;
+  if(!on)return;
+  const b=$('advToggle');
+  b.textContent=r.settled?'已收回 ✓  (點一下改回未收)':'未收回  ·  點一下標記已收回';
+  b.classList.toggle('done',!!r.settled);
+}
 function openSheet(r){
   sheetRow=r;
   $('sheetName').value=r.merchant;
   $('sheetAmt').textContent=money(r.amount);
   $('sheetAmtIn').value=r.amount;
   $('sheetDate').value=dOnly(r.ts);
-  document.querySelectorAll('.chip').forEach(ch=>
+  $('chipWrap').querySelectorAll('.chip').forEach(ch=>
     ch.classList.toggle('sel',ch.dataset.cat===r.category));
+  reflectTier(r);
   $('scrim').classList.add('on');$('sheet').classList.add('on');
 }
 $('sheetName').addEventListener('change',async e=>{
@@ -729,6 +898,27 @@ $('chipWrap').addEventListener('click',async e=>{
   closeSheet();await render();scheduleSync();
   toast(msg);
 });
+$('advToggle').onclick=async()=>{
+  if(!sheetRow)return;
+  sheetRow.settled=!sheetRow.settled;
+  sheetRow.settledTs=sheetRow.settled?Date.now():null;  // 留著,之後想看回收速度用得上
+  sheetRow.updated=Date.now();
+  await put(sheetRow);
+  reflectAdv(sheetRow);
+  await render();scheduleSync();
+  toast(sheetRow.settled?'已標記收回':'改回未收回');
+};
+/* tier 不關面板:通常是「順手改一下」,關掉反而要重點一次進來 */
+$('tierWrap').addEventListener('click',async e=>{
+  const ch=e.target.closest('.chip');if(!ch||!sheetRow)return;
+  const t=ch.dataset.tier;
+  sheetRow.tier=(sheetRow.tier===t)?null:t;   // 再點一次取消覆寫,回到分類預設
+  sheetRow.updated=Date.now();
+  await put(sheetRow);
+  reflectTier(sheetRow);
+  await render();scheduleSync();
+  toast(sheetRow.tier?`已標:${t}`:'已回到分類預設');
+});
 $('sheetDel').onclick=async()=>{
   if(!sheetRow)return;
   const r=sheetRow;
@@ -784,8 +974,122 @@ function sumByYm(pred){ // ym -> 符合條件的金額加總
 }
 const entSpend=()=>sumByYm(r=>ENT_CATS.includes(r.category)); // 消費(娛樂+衣物)
 const aucIncome=()=>sumByYm(r=>r.category===AUC_CAT);          // 拍賣收入(自動加總)
+
+/* ══ baseline / coverage ══════════════════════════════════
+   底線金額是私人資料,只存在裝置(+你自己的 Supabase),不進原始碼。 */
+let baseline={need:0,family:0,kid:null};   // kid=null → 用記帳自動估
+async function loadBaseline(){
+  const m=(await allMeta()).find(x=>x.k==='baseline');
+  baseline={need:+(m&&m.need)||0,family:+(m&&m.family)||0,
+            kid:(m&&m.kid!=null&&m.kid!=='')?+m.kid:null};
+}
+async function saveBaseline(){
+  await putMeta({k:'baseline',need:baseline.need,family:baseline.family,
+                 kid:baseline.kid,updated:Date.now()});
+  scheduleSync();
+}
+/* 往回數 n 個「完整月」(不含當月)。當月還沒過完,算進月均只會低估自己。 */
+function pastYms(n){
+  const d=new Date();d.setDate(1);
+  const out=[];
+  for(let i=0;i<n;i++){d.setMonth(d.getMonth()-1);out.push(ymKey(d.getTime()))}
+  return out;
+}
+/* 小孩月均:年表上完全沒這塊,只能從記帳估。
+   近 6 個完整月,但排除「開始記帳以前」的月份——否則除以 6 會低估。 */
+function kidEstimate(){
+  if(!rows.length)return null;
+  const first=ymKey(Math.min(...rows.map(r=>r.ts)));
+  const yms=pastYms(6).filter(ym=>ym>=first);
+  if(!yms.length)return null;
+  const m=sumByYm(r=>KID_CATS.includes(r.category));
+  return {avg:yms.reduce((s,ym)=>s+(m[ym]||0),0)/yms.length,months:yms.length};
+}
+function coverage(){
+  const est=kidEstimate();
+  const kid=baseline.kid!=null?baseline.kid:(est?est.avg:0);
+  const base=baseline.need+baseline.family+kid;
+  const m=sumByYm(isBizInc);
+  const avg=pastYms(3).reduce((s,ym)=>s+(m[ym]||0),0)/3;
+  let streak=0;                                  // 連續達標幾個月 = 能不能走的訊號
+  if(base>0)for(const ym of pastYms(24)){if((m[ym]||0)>=base)streak++;else break}
+  return {base,kid,est,avg,pct:base>0?avg/base:0,streak};
+}
+/* 某年各 tier 的支出合計(收入不算)。沒 tier 的獨立列出來,才知道還有多少沒標。 */
+function tierTotals(year){
+  const t={};TIERS.forEach(x=>t[x]=0);let unset=0;
+  rows.forEach(r=>{
+    if(isIncome(r)||new Date(r.ts).getFullYear()!==year)return;
+    const k=tierOf(r);
+    if(k&&t[k]!=null)t[k]+=r.amount;else unset+=r.amount;
+  });
+  return {t,unset};
+}
+function monthsElapsed(year){
+  const now=new Date(),cy=now.getFullYear();
+  if(year<cy)return 12;
+  if(year>cy)return 0;
+  return Math.max(1,now.getMonth());  // 已過完的月數,至少 1 免得除以 0
+}
+function renderCoverage(){
+  const c=coverage();
+  const hit=c.base>0&&c.pct>=1;
+  $('bNeed').value=baseline.need||'';
+  $('bFam').value =baseline.family||'';
+  $('bKid').value =baseline.kid!=null?baseline.kid:'';
+  $('kidAuto').textContent=c.est
+    ? `(自動 ${money(c.est.avg)}／近${c.est.months}月)` : '(資料不足)';
+  $('baseTotal').textContent=c.base?money(c.base):'—';
+  $('covPct').textContent=c.base?Math.round(c.pct*100)+'%':'—';
+  $('covPct').classList.toggle('hit',hit);
+  $('covSub').innerHTML=c.base
+    ? `事業收入月均 <b>${money(c.avg)}</b><br>還差 <b>${money(Math.max(0,c.base-c.avg))}</b>`
+    : '先填下面的必要與家人金額';
+  $('covStreak').textContent=c.streak?`連續達標 ${c.streak} 個月`:'';
+  const bar=$('covBar');
+  bar.style.width=Math.min(100,Math.round(c.pct*100))+'%';
+  bar.classList.toggle('hit',hit);
+}
+/* 已墊未收:跨年度看,因為墊出去的錢不會因為換年就消失 */
+function renderOwed(){
+  const owed=rows.filter(isOwed);
+  const box=$('oweBox');
+  box.hidden=!owed.length;
+  if(!owed.length)return;
+  const total=owed.reduce((s,r)=>s+r.amount,0);
+  const oldest=Math.min(...owed.map(r=>r.ts));
+  const days=Math.floor((Date.now()-oldest)/864e5);
+  $('oweAmt').textContent=money(total);
+  $('oweInfo').innerHTML=`<b>${owed.length}</b> 筆未收回<br>最久的已經 <b>${days}</b> 天`;
+}
+function renderTiers(){
+  const {t,unset}=tierTotals(statYear);
+  const mo=monthsElapsed(statYear);
+  $('tierBasis').textContent=mo?`${statYear} 年 · 已過 ${mo} 個月`:`${statYear} 年尚未開始`;
+  const spend=TIERS.reduce((s,k)=>s+t[k],0)+unset;
+  const line=(name,color,amt)=>`<tr>
+    <td class="tname">${color?`<span class="cd" style="background:${color}"></span>`:''}${esc(name)}</td>
+    <td class="num">${mo?money(amt/mo):'—'}</td>
+    <td class="num">${money(amt)}</td>
+    <td class="tpct">${spend?Math.round(amt/spend*100)+'%':'—'}</td></tr>`;
+  $('tierBody').innerHTML=
+    TIERS.map(k=>line(k,TIER_COLOR[k],t[k])).join('')
+    +(unset?line('未標記',null,unset):'');
+}
+async function saveBaseField(f,val){
+  const v=val.trim();
+  if(f==='kid')baseline.kid=v===''?null:(parseFloat(v)||0);
+  else baseline[f]=parseFloat(v)||0;
+  await saveBaseline();
+  renderCoverage();
+}
+['bNeed','bFam','bKid'].forEach(id=>{
+  const f=id==='bNeed'?'need':id==='bFam'?'family':'kid';
+  $(id).addEventListener('change',e=>saveBaseField(f,e.target.value));
+});
 async function renderStats(){
-  await loadMonths();
+  await loadMonths();await loadBaseline();
+  renderCoverage();renderOwed();renderTiers();
   const ent=entSpend(),auc=aucIncome();
   $('yrLabel').textContent=statYear;
   let tE=0,tA=0;
@@ -1077,12 +1381,15 @@ async function cloudSync(interactive){
   syncing=true;
   try{
     const remote=await sbLoad();
-    const rTx=(remote&&remote.tx)||[],rMonth=(remote&&remote.monthly)||[];
+    const rTx=(remote&&remote.tx)||[],rMonth=(remote&&remote.monthly)||[],
+          rMeta=(remote&&remote.meta)||[];
     const mTx=mergeById(await all(),rTx,'id');
     const mMonth=mergeById(await allMonths(),rMonth,'ym');
+    const mMeta=mergeById(await allMeta(),rMeta,'k');   // 底線設定也跟著走
     for(const r of mTx)await put(r);
     for(const m of mMonth)await putMonth(m);
-    await sbSave({v:3,exported:new Date().toISOString(),tx:mTx,monthly:mMonth});
+    for(const m of mMeta)await putMeta(m);
+    await sbSave({v:4,exported:new Date().toISOString(),tx:mTx,monthly:mMonth,meta:mMeta});
     localStorage.setItem('sb_last',Date.now());
     await render();syncMark();
     if(interactive)toast('已同步 '+mTx.filter(r=>!r.deleted).length+' 筆'); // 跟右下角「N 筆」一樣不算 tombstone
@@ -1181,8 +1488,8 @@ setInterval(()=>{if(!document.hidden)cloudSync(false)},45000);
 
 /* ══ export / import ══════════════════════════════════════ */
 $('export').onclick=async()=>{
-  const data=await all();const months=await allMonths();
-  const blob=new Blob([JSON.stringify({v:2,exported:new Date().toISOString(),tx:data,monthly:months},null,2)],{type:'application/json'});
+  const data=await all();const months=await allMonths();const meta=await allMeta();
+  const blob=new Blob([JSON.stringify({v:4,exported:new Date().toISOString(),tx:data,monthly:months,meta},null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download=`ledger-${dayKey(Date.now())}.json`;
@@ -1213,6 +1520,7 @@ $('file').onchange=async e=>{
       await put(r);n++;
     }
     if(Array.isArray(j.monthly))for(const m of j.monthly){if(m&&m.ym)await putMonth(m)}
+    if(Array.isArray(j.meta))for(const m of j.meta){if(m&&m.k)await putMeta(m)}
     await render();toast(`匯入 ${n} 筆`);
   }catch{toast('檔案讀不了')}
   e.target.value='';
@@ -1220,6 +1528,7 @@ $('file').onchange=async e=>{
 
 /* ══ boot ═════════════════════════════════════════════════ */
 buildChips();
+buildTierChips();
 buildCatFilter();
 reflectAI();
 reflectSync();
